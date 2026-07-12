@@ -15,7 +15,10 @@ Config JSON (per site):
 {
   "anchors": [[topo_px_x, topo_px_y, elevation_m], ...],   // required for real DEM
   "roads_transform": [scale, ox, oy],                       // roads->overview px (optional)
-  "topo_to_overview": [scale, ox, oy]                       // manual override (optional)
+  "topo_to_overview": [scale, ox, oy],                      // manual override (optional)
+  "align_pairs": [[topo_x, topo_y, ov_x, ov_y], ...],       // >=2 matching points (optional)
+  "topo": "file.jpg", "roads": "file.jpg",                  // explicit roles (optional)
+  "overview": "file.jpg", "skip": ["file.jpg", ...]
 }
 """
 import argparse, glob, itertools, json, os, sys
@@ -249,9 +252,19 @@ def find_blue_markers(img):
             out.append((x + w2 / 2, y + h2 / 2))
     return out
 
-def topo_to_overview_transform(topo, overview, manual):
+def topo_to_overview_transform(topo, overview, manual, pairs=None):
     if manual:
         return tuple(manual)
+    if pairs and len(pairs) >= 2:
+        # least-squares similarity (no rotation: both maps are north-up) from
+        # user-clicked matching points [[tx,ty,ox,oy],...]
+        t = np.array([[p[0], p[1]] for p in pairs], float)
+        o = np.array([[p[2], p[3]] for p in pairs], float)
+        dt = t - t.mean(axis=0); do = o - o.mean(axis=0)
+        s = float(np.sqrt((do ** 2).sum() / max((dt ** 2).sum(), 1e-9)))
+        off = o.mean(axis=0) - s * t.mean(axis=0)
+        print(f"  topo->overview (from {len(pairs)} pairs): scale={s:.4f} off=({off[0]:.1f},{off[1]:.1f})")
+        return s, float(off[0]), float(off[1])
     mt = find_blue_markers(topo); mo = find_blue_markers(overview)
     best = None
     for (a1, a2) in itertools.permutations(mt, 2):
@@ -492,10 +505,22 @@ def main():
     print("images:", len(paths))
     print("[1/6] classify")
     topo_p, roads_p, aerial_ps = classify(paths)
+    # explicit role overrides from the config (set by the admin studio)
+    by_name = {os.path.basename(p): p for p in paths}
+    if cfg.get("topo") in by_name:
+        topo_p = by_name[cfg["topo"]]
+    if cfg.get("roads") in by_name:
+        roads_p = by_name[cfg["roads"]]
+    elif cfg.get("roads") == "":
+        roads_p = None
+    if cfg.get("aerials"):
+        aerial_ps = [by_name[n] for n in cfg["aerials"] if n in by_name]
+    aerial_ps = [p for p in aerial_ps if p not in (topo_p, roads_p)]
     if topo_p is None or not aerial_ps:
         raise SystemExit("need a topo map and at least one aerial")
-    if args.overview:
-        ov_p = next(p for p in aerial_ps if os.path.basename(p) == args.overview)
+    ov_name = args.overview or cfg.get("overview")
+    if ov_name and ov_name in by_name:
+        ov_p = by_name[ov_name]
     else:
         ov_p = min(aerial_ps, key=lambda p: imread(p).shape[0] * imread(p).shape[1])
     part_ps = [p for p in aerial_ps if p != ov_p]
@@ -528,7 +553,8 @@ def main():
         cmask = contour_mask_clean(topo)
     else:
         dem, cmask = build_dem(topo, anchors, km_px)
-    t2o = topo_to_overview_transform(topo, imread(ov_p), cfg.get("topo_to_overview"))
+    t2o = topo_to_overview_transform(topo, imread(ov_p), cfg.get("topo_to_overview"),
+                                     cfg.get("align_pairs"))
 
     print("[5/6] buildings + vegetation")
     px_m = (1000.0 / km_px) / t2o[0] * to_ov[0]  # meters per mosaic px

@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>סטודיו מרחבים — דגם תלת־ממדי</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#101418; color:#e8f1fa; font-family:"Segoe UI",Arial,sans-serif; padding:18px; }
+  h1 { font-size:20px; margin-bottom:4px; }
+  .sub { color:#9fc1e8; font-size:13px; margin-bottom:18px; }
+  .card { background:#16202c; border:1px solid #26374a; border-radius:14px; padding:16px; margin-bottom:14px; }
+  .card h2 { font-size:15px; color:#9fc1e8; margin-bottom:10px; }
+  .step-num { display:inline-block; background:#2b6cb0; color:#fff; border-radius:50%;
+    width:22px; height:22px; text-align:center; line-height:22px; font-size:12px; margin-left:8px; }
+  input[type=text], input[type=number] {
+    background:#0e1620; border:1px solid #3a4a5c; border-radius:8px; color:#e8f1fa;
+    padding:8px 10px; font-size:14px; font-family:inherit;
+  }
+  button {
+    background:#2b6cb0; color:#fff; border:none; border-radius:9px;
+    padding:9px 18px; font-size:14px; cursor:pointer; font-family:inherit;
+  }
+  button:disabled { background:#324156; color:#7a8ea3; cursor:default; }
+  button.sec { background:#26374a; }
+  #drop {
+    border:2px dashed #3a4a5c; border-radius:12px; padding:26px; text-align:center;
+    color:#9fc1e8; cursor:pointer; transition:border-color .2s;
+  }
+  #drop.over { border-color:#4da3ff; background:rgba(77,163,255,.06); }
+  #thumbs { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+  .thumb { width:150px; background:#0e1620; border-radius:10px; overflow:hidden; border:1px solid #26374a; }
+  .thumb img { width:100%; height:92px; object-fit:cover; display:block; }
+  .thumb .nm { font-size:10px; color:#7a8ea3; padding:3px 6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; direction:ltr; }
+  .thumb select { width:100%; border:none; background:#1b2836; color:#cfe0f3; font-size:11px; padding:4px; font-family:inherit; }
+  .badge { font-size:10px; padding:1px 7px; border-radius:8px; margin:4px 6px 0; display:inline-block; }
+  .b-topo { background:#7c5f24; } .b-roads { background:#3d5a80; } .b-aerial { background:#2f5d3a; } .b-overview { background:#6b3fa0; }
+  #anchorWrap { position:relative; display:inline-block; max-width:100%; }
+  #anchorImg { max-width:100%; border-radius:10px; display:block; }
+  .apin { position:absolute; transform:translate(-50%,-100%); font-size:11px; background:#c0392b; color:#fff;
+    padding:1px 5px; border-radius:6px 6px 6px 0; cursor:pointer; white-space:nowrap; }
+  .apin.pair { background:#8e44ad; border-radius:50%; width:16px; height:16px; padding:0;
+    transform:translate(-50%,-50%); text-align:center; line-height:16px; }
+  #elevBox { position:absolute; display:none; z-index:5; }
+  #elevBox input { width:76px; }
+  #log { background:#0a0f14; border-radius:10px; padding:10px; font-family:Consolas,monospace;
+    font-size:11px; white-space:pre-wrap; direction:ltr; text-align:left; max-height:260px; overflow-y:auto; margin-top:10px; }
+  .rowflex { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .hint { font-size:12px; color:#7a8ea3; margin-top:6px; line-height:1.5; }
+  .ok { color:#67d475; } .bad { color:#ef6a5a; }
+  a { color:#4da3ff; }
+  #pairImgs { display:flex; gap:10px; flex-wrap:wrap; }
+  #pairImgs > div { position:relative; flex:1; min-width:280px; }
+  #pairImgs img { max-width:100%; border-radius:10px; display:block; }
+</style>
+</head>
+<body>
+<h1>🗺️ סטודיו מרחבים</h1>
+<div class="sub">יצירת דגם תלת־ממדי חדש מסט מפות — מקומי בלבד (רץ על המחשב הזה)</div>
+
+<div class="card">
+  <h2><span class="step-num">1</span>מרחב חדש</h2>
+  <div class="rowflex">
+    <input type="text" id="siteId" placeholder="מזהה באנגלית, למשל: ein-gedi" style="direction:ltr; width:200px">
+    <input type="text" id="siteName" placeholder="שם לתצוגה, למשל: עין גדי" style="width:220px">
+    <button id="createBtn">התחלה</button>
+  </div>
+  <div class="hint">המזהה ישמש בכתובת: ‎chepti.com/maps/?site=מזהה</div>
+</div>
+
+<div class="card" id="cardUpload" style="display:none">
+  <h2><span class="step-num">2</span>העלאת מפות ותצלומים</h2>
+  <div id="drop">גררי לכאן תמונות, או לחצי לבחירה<br>
+    <span style="font-size:11px">מפה טופוגרפית · תצלום אוויר כללי · תצלומי אוויר חלקיים · מפת כבישים (רשות)</span>
+    <input type="file" id="fileIn" multiple accept="image/*" style="display:none">
+  </div>
+  <div id="thumbs"></div>
+  <div class="rowflex" style="margin-top:10px">
+    <button id="classifyBtn" class="sec" disabled>זיהוי אוטומטי של סוגי התמונות</button>
+    <span class="hint">אחרי הזיהוי אפשר לתקן ידנית בכל תמונה</span>
+  </div>
+</div>
+
+<div class="card" id="cardAnchors" style="display:none">
+  <h2><span class="step-num">3</span>נקודות גובה על המפה הטופוגרפית</h2>
+  <div class="hint" style="margin-bottom:8px">
+    לוחצים על המפה בנקודה שגובהה ידוע (על קו גובה מסומן, פסגה וכד') ומקלידים את הגובה במטרים.
+    כמה שיותר נקודות, מפוזרות על כל המפה — מודל מדויק יותר. מינימום 6–8.
+    לחיצה על תווית קיימת מוחקת אותה.
+  </div>
+  <div id="anchorWrap">
+    <img id="anchorImg">
+    <div id="elevBox"><input type="number" id="elevIn" placeholder="גובה מ'"> <button id="elevOk" style="padding:4px 10px">✓</button></div>
+  </div>
+  <div class="hint"><span id="anchorCount">0</span> נקודות סומנו</div>
+</div>
+
+<div class="card" id="cardPairs" style="display:none">
+  <h2><span class="step-num">4</span>יישור המפה לתצלום (אם אין עיגולים כחולים)</h2>
+  <div class="hint" style="margin-bottom:8px">
+    אם על המפה והתצלום יש סימוני עיגולים כחולים זהים — אפשר לדלג, היישור אוטומטי.
+    אחרת: לוחצים על נקודה מזוהה במפה (צומת, פנייה חדה) ואז על אותה נקודה בתצלום. צריך לפחות 2 זוגות.
+  </div>
+  <div id="pairImgs">
+    <div><div class="hint">מפה טופוגרפית</div><img id="pairTopo"></div>
+    <div><div class="hint">תצלום אוויר כללי</div><img id="pairOv"></div>
+  </div>
+  <div class="hint"><span id="pairCount">0</span> זוגות · <button id="pairClear" class="sec" style="padding:4px 10px">ניקוי</button></div>
+</div>
+
+<div class="card" id="cardBuild" style="display:none">
+  <h2><span class="step-num">5</span>בנייה ופרסום</h2>
+  <div class="rowflex">
+    <button id="buildBtn">🔨 בניית הדגם</button>
+    <button id="previewBtn" class="sec" disabled>👁 תצוגה מקומית</button>
+    <button id="publishBtn" disabled>🚀 פרסום לאתר</button>
+    <span id="liveLink"></span>
+  </div>
+  <div id="log" style="display:none"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let SITE = '', FILES = [], ROLES = {}, ANCHORS = [], PAIRS = [], pendingPair = null;
+let natTopo = [1, 1], natOv = [1, 1];
+
+$('createBtn').onclick = () => {
+  const id = $('siteId').value.trim();
+  if (!/^[a-zA-Z0-9_-]{2,40}$/.test(id)) { alert('מזהה באנגלית בלבד (אותיות/מספרים/מקף)'); return; }
+  if (!$('siteName').value.trim()) { alert('חסר שם לתצוגה'); return; }
+  SITE = id;
+  $('cardUpload').style.display = '';
+  $('siteId').disabled = $('siteName').disabled = $('createBtn').disabled = true;
+};
+
+const drop = $('drop');
+drop.onclick = () => $('fileIn').click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); upload(e.dataTransfer.files); };
+$('fileIn').onchange = e => upload(e.target.files);
+
+async function upload(files){
+  const fd = new FormData();
+  for (const f of files) fd.append('file', f, f.name);
+  drop.textContent = 'מעלה…';
+  const r = await (await fetch('/upload?site=' + SITE, { method: 'POST', body: fd })).json();
+  FILES.push(...r.saved);
+  drop.innerHTML = 'גררי עוד תמונות או לחצי לבחירה<input type="file" id="fileIn2" multiple accept="image/*" style="display:none">';
+  document.getElementById('fileIn2').onchange = e => upload(e.target.files);
+  drop.onclick = () => document.getElementById('fileIn2').click();
+  renderThumbs();
+  $('classifyBtn').disabled = FILES.length < 2;
+}
+
+function renderThumbs(){
+  $('thumbs').innerHTML = '';
+  for (const f of FILES){
+    const d = document.createElement('div');
+    d.className = 'thumb';
+    const role = ROLES[f] || 'aerial';
+    d.innerHTML = `<img src="/input/${SITE}/${encodeURIComponent(f)}"><div class="nm">${f}</div>
+      <select data-f="${f}">
+        <option value="aerial" ${role === 'aerial' ? 'selected' : ''}>תצלום אוויר חלקי</option>
+        <option value="overview" ${role === 'overview' ? 'selected' : ''}>תצלום אוויר כללי</option>
+        <option value="topo" ${role === 'topo' ? 'selected' : ''}>מפה טופוגרפית</option>
+        <option value="roads" ${role === 'roads' ? 'selected' : ''}>מפת כבישים</option>
+        <option value="skip" ${role === 'skip' ? 'selected' : ''}>דילוג</option>
+      </select>`;
+    d.querySelector('select').onchange = e => { ROLES[f] = e.target.value; afterRoles(); };
+    $('thumbs').appendChild(d);
+  }
+}
+
+$('classifyBtn').onclick = async () => {
+  $('classifyBtn').textContent = 'מזהה…';
+  const r = await (await fetch('/classify?site=' + SITE, { method: 'POST' })).json();
+  if (r.error) { alert(r.error); return; }
+  for (const f of FILES) ROLES[f] = 'aerial';
+  if (r.topo) ROLES[r.topo] = 'topo';
+  if (r.roads) ROLES[r.roads] = 'roads';
+  if (r.overview) ROLES[r.overview] = 'overview';
+  $('classifyBtn').textContent = 'זיהוי אוטומטי של סוגי התמונות';
+  renderThumbs(); afterRoles();
+};
+
+function roleFile(role){ return FILES.find(f => ROLES[f] === role); }
+
+function afterRoles(){
+  const topo = roleFile('topo'), ov = roleFile('overview');
+  if (!topo || !ov) return;
+  $('cardAnchors').style.display = $('cardPairs').style.display = $('cardBuild').style.display = '';
+  const ai = $('anchorImg');
+  if (!ai.src.includes(encodeURIComponent(topo))){
+    ai.src = `/input/${SITE}/${encodeURIComponent(topo)}`;
+    ai.onload = () => { natTopo = [ai.naturalWidth, ai.naturalHeight]; };
+    $('pairTopo').src = ai.src;
+    $('pairTopo').onload = () => {};
+  }
+  const oi = $('pairOv');
+  if (!oi.src.includes(encodeURIComponent(ov))){
+    oi.src = `/input/${SITE}/${encodeURIComponent(ov)}`;
+    oi.onload = () => { natOv = [oi.naturalWidth, oi.naturalHeight]; };
+  }
+}
+
+// ---- anchors ----
+const wrap = $('anchorWrap'), elevBox = $('elevBox');
+let pendingXY = null;
+$('anchorImg').onclick = e => {
+  const r = e.target.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  pendingXY = [x, y];
+  elevBox.style.display = 'block';
+  elevBox.style.left = (e.clientX - r.left + 6) + 'px';
+  elevBox.style.top = (e.clientY - r.top + 6) + 'px';
+  $('elevIn').value = '';
+  $('elevIn').focus();
+};
+function addAnchor(){
+  const v = parseFloat($('elevIn').value);
+  if (!isFinite(v) || !pendingXY) { elevBox.style.display = 'none'; return; }
+  ANCHORS.push([pendingXY[0], pendingXY[1], v]);
+  elevBox.style.display = 'none';
+  renderAnchors();
+}
+$('elevOk').onclick = addAnchor;
+$('elevIn').onkeydown = e => { if (e.key === 'Enter') addAnchor(); };
+function renderAnchors(){
+  wrap.querySelectorAll('.apin').forEach(p => p.remove());
+  ANCHORS.forEach((a, i) => {
+    const p = document.createElement('div');
+    p.className = 'apin';
+    p.style.left = (a[0] * 100) + '%';
+    p.style.top = (a[1] * 100) + '%';
+    p.textContent = a[2];
+    p.title = 'לחיצה מוחקת';
+    p.onclick = ev => { ev.stopPropagation(); ANCHORS.splice(i, 1); renderAnchors(); };
+    wrap.appendChild(p);
+  });
+  $('anchorCount').textContent = ANCHORS.length;
+}
+
+// ---- align pairs ----
+function pairClick(which){
+  return e => {
+    const r = e.target.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    if (which === 'topo') pendingPair = [x, y];
+    else if (pendingPair){ PAIRS.push([...pendingPair, x, y]); pendingPair = null; renderPairs(); }
+    renderPairs();
+  };
+}
+$('pairTopo').onclick = pairClick('topo');
+$('pairOv').onclick = pairClick('ov');
+function renderPairs(){
+  document.querySelectorAll('#pairImgs .apin').forEach(p => p.remove());
+  const mk = (parent, x, y, n) => {
+    const p = document.createElement('div');
+    p.className = 'apin pair';
+    p.style.left = (x * 100) + '%'; p.style.top = (y * 100) + '%';
+    p.textContent = n;
+    parent.appendChild(p);
+  };
+  PAIRS.forEach((pr, i) => {
+    mk($('pairTopo').parentElement, pr[0], pr[1], i + 1);
+    mk($('pairOv').parentElement, pr[2], pr[3], i + 1);
+  });
+  if (pendingPair) mk($('pairTopo').parentElement, pendingPair[0], pendingPair[1], '?');
+  $('pairCount').textContent = PAIRS.length;
+}
+$('pairClear').onclick = () => { PAIRS = []; pendingPair = null; renderPairs(); };
+
+// ---- build & publish ----
+async function pollLog(onDone){
+  const r = await (await fetch('/build-log')).json();
+  $('log').style.display = '';
+  $('log').textContent = r.log;
+  $('log').scrollTop = $('log').scrollHeight;
+  if (r.running) setTimeout(() => pollLog(onDone), 1200);
+  else onDone(r.ok);
+}
+$('buildBtn').onclick = async () => {
+  const topo = roleFile('topo');
+  if (!topo) { alert('צריך לסמן איזו תמונה היא המפה הטופוגרפית'); return; }
+  if (ANCHORS.length < 4 && !confirm('סומנו פחות מ-4 נקודות גובה — השטח עלול לצאת שטוח. להמשיך?')) return;
+  const config = {
+    topo: topo,
+    roads: roleFile('roads') || '',
+    overview: roleFile('overview') || undefined,
+    skip: FILES.filter(f => ROLES[f] === 'skip'),
+    aerials: FILES.filter(f => (ROLES[f] || 'aerial') === 'aerial' || ROLES[f] === 'overview'),
+    anchors: ANCHORS.map(a => [Math.round(a[0] * natTopo[0]), Math.round(a[1] * natTopo[1]), a[2]]),
+  };
+  if (PAIRS.length >= 2)
+    config.align_pairs = PAIRS.map(p => [Math.round(p[0] * natTopo[0]), Math.round(p[1] * natTopo[1]),
+                                         Math.round(p[2] * natOv[0]), Math.round(p[3] * natOv[1])]);
+  $('buildBtn').disabled = true;
+  await fetch('/build', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ site: SITE, name: $('siteName').value.trim(), config }) });
+  pollLog(ok => {
+    $('buildBtn').disabled = false;
+    $('previewBtn').disabled = $('publishBtn').disabled = !ok;
+    if (ok) $('previewBtn').onclick = () => open('/?site=' + SITE, '_blank');
+  });
+};
+$('publishBtn').onclick = async () => {
+  $('publishBtn').disabled = true;
+  await fetch('/publish?site=' + SITE, { method: 'POST' });
+  pollLog(ok => {
+    $('publishBtn').disabled = false;
+    if (ok) $('liveLink').innerHTML = `<a href="https://chepti.com/maps/?site=${SITE}" target="_blank">פתיחה באתר החי ↗</a>`;
+  });
+};
+</script>
+</body>
+</html>
