@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>נור א-שמס — דגם תלת־ממדי מהמפות</title>
+<title>דגם תלת־ממדי מהמפות</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { height:100%; overflow:hidden; background:#101418; font-family:"Segoe UI",Arial,sans-serif; }
@@ -11,31 +11,39 @@
   #title {
     position:fixed; top:10px; right:12px; z-index:5; color:#fff;
     background:rgba(10,14,20,.65); backdrop-filter:blur(6px);
-    padding:8px 14px; border-radius:12px; pointer-events:none;
+    padding:7px 12px; border-radius:12px; pointer-events:none; max-width:70vw;
   }
-  #title h1 { font-size:16px; font-weight:600; }
+  #title h1 { font-size:15px; font-weight:600; }
   #title small { color:#9fc1e8; font-size:11px; }
-  #panel {
-    position:fixed; bottom:12px; right:12px; z-index:5; color:#eee;
-    background:rgba(10,14,20,.72); backdrop-filter:blur(8px);
-    padding:12px 14px; border-radius:14px; width:250px; max-width:calc(100vw - 24px);
-    transition:transform .25s;
+  #fab {
+    position:fixed; bottom:14px; right:14px; z-index:7;
+    width:46px; height:46px; border-radius:50%; border:none;
+    background:#2b6cb0; color:#fff; font-size:21px; cursor:pointer;
+    box-shadow:0 2px 10px rgba(0,0,0,.5);
   }
-  #panel.closed { transform:translateY(calc(100% - 38px)); }
-  #panelHead { display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none; }
-  #panelHead b { font-size:14px; }
-  #panelHead span { font-size:18px; color:#9fc1e8; }
-  .row { margin-top:10px; font-size:13px; }
-  .row label { display:flex; justify-content:space-between; margin-bottom:3px; color:#cfe0f3; }
+  #panel {
+    position:fixed; bottom:70px; right:14px; z-index:6; color:#eee;
+    background:rgba(10,14,20,.78); backdrop-filter:blur(8px);
+    padding:12px 14px; border-radius:14px; width:248px; max-width:calc(100vw - 28px);
+    max-height:calc(100vh - 140px); overflow-y:auto;
+  }
+  #panel.hidden { display:none; }
+  .row { margin-top:9px; font-size:13px; }
+  .row:first-child { margin-top:0; }
+  .row label { display:flex; justify-content:space-between; margin-bottom:2px; color:#cfe0f3; }
   input[type=range] { width:100%; accent-color:#4da3ff; }
-  .toggles { display:flex; gap:6px; margin-top:12px; flex-wrap:wrap; }
+  select {
+    width:100%; padding:6px 8px; border-radius:8px; border:1px solid #3a4a5c;
+    background:#16202c; color:#e8f1fa; font-size:13px; font-family:inherit;
+  }
+  .toggles { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
   .tbtn {
-    flex:1; min-width:70px; text-align:center; font-size:12px; padding:7px 4px;
+    flex:1; min-width:64px; text-align:center; font-size:12px; padding:7px 4px;
     border-radius:9px; border:1px solid #3a4a5c; color:#cfe0f3; cursor:pointer; user-select:none;
     background:rgba(255,255,255,.04);
   }
   .tbtn.on { background:#2b6cb0; border-color:#4da3ff; color:#fff; }
-  #resetBtn { margin-top:12px; width:100%; padding:8px; border-radius:9px; border:none;
+  #resetBtn { margin-top:10px; width:100%; padding:8px; border-radius:9px; border:none;
     background:#2b6cb0; color:#fff; font-size:13px; cursor:pointer; }
   #load {
     position:fixed; inset:0; z-index:10; background:#101418; color:#cfe0f3;
@@ -50,31 +58,35 @@
 <canvas id="c"></canvas>
 
 <div id="title">
-  <h1>נור א-שמס · דגם תלת־ממדי</h1>
+  <h1 id="placeName">דגם תלת־ממדי</h1>
   <small>נבנה אוטומטית ממפה טופוגרפית + תצלומי אוויר</small>
 </div>
 
+<button id="fab" title="פקדים">🎛</button>
+
 <div id="panel">
-  <div id="panelHead"><b>שכבות ותצוגה</b><span id="panelArrow">▾</span></div>
-  <div id="panelBody">
-    <div class="row">
-      <label><span>הגזמת גובה</span><span id="exV">×1.5</span></label>
-      <input id="ex" type="range" min="1" max="3" step="0.1" value="1.5">
-    </div>
-    <div class="row">
-      <label><span>מפה טופוגרפית</span><span id="wtV">0%</span></label>
-      <input id="wt" type="range" min="0" max="1" step="0.05" value="0">
-    </div>
-    <div class="row">
-      <label><span>מפת כבישים</span><span id="wrV">0%</span></label>
-      <input id="wr" type="range" min="0" max="1" step="0.05" value="0">
-    </div>
-    <div class="toggles">
-      <div class="tbtn on" id="tBld">בתים</div>
-      <div class="tbtn" id="tCont">קווי גובה</div>
-    </div>
-    <button id="resetBtn">איפוס מבט</button>
+  <div class="row" id="siteRow" style="display:none">
+    <label><span>אתר</span></label>
+    <select id="siteSel"></select>
   </div>
+  <div class="row">
+    <label><span>הגזמת גובה</span><span id="exV">×2.0</span></label>
+    <input id="ex" type="range" min="1" max="5" step="0.25" value="2">
+  </div>
+  <div class="row">
+    <label><span>מפה טופוגרפית</span><span id="wtV">0%</span></label>
+    <input id="wt" type="range" min="0" max="1" step="0.05" value="0">
+  </div>
+  <div class="row" id="roadsRow">
+    <label><span>מפת כבישים</span><span id="wrV">0%</span></label>
+    <input id="wr" type="range" min="0" max="1" step="0.05" value="0">
+  </div>
+  <div class="toggles">
+    <div class="tbtn on" id="tBld">בתים</div>
+    <div class="tbtn on" id="tVeg">צמחייה</div>
+    <div class="tbtn" id="tCont">קווי גובה</div>
+  </div>
+  <button id="resetBtn">איפוס מבט</button>
 </div>
 
 <div id="credit">Imagery: Google · Maps: OpenTopoMap / OSM (CC-BY-SA)</div>
@@ -94,97 +106,118 @@ import { OrbitControls } from './js/OrbitControls.js';
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(innerWidth, innerHeight);
+renderer.setSize(Math.max(innerWidth, 2), Math.max(innerHeight, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0e141c);
 scene.fog = new THREE.Fog(0x0e141c, 2200, 4200);
 
-const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 1, 9000);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / Math.max(innerHeight, 1), 1, 9000);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI * 0.49;
-controls.minDistance = 50;
-controls.maxDistance = 3000;
+controls.minDistance = 40;
+controls.maxDistance = 3200;
 
 scene.add(new THREE.HemisphereLight(0xbfd6ee, 0x36322a, 0.9));
 const sun = new THREE.DirectionalLight(0xffefd0, 1.4);
-sun.position.set(500, 900, -300);   // sun in NE (matches SW shadows in imagery)
+sun.position.set(500, 900, -300);
 scene.add(sun);
 
+// ---------- pick site ----------
+const sites = await (await fetch('data/sites.json')).json();
+const params = new URLSearchParams(location.search);
+const siteId = sites.some(s => s.id === params.get('site')) ? params.get('site') : sites[0].id;
+const D = 'data/' + siteId + '/';
+if (sites.length > 1) {
+  document.getElementById('siteRow').style.display = '';
+  const sel = document.getElementById('siteSel');
+  for (const s of sites) {
+    const o = document.createElement('option');
+    o.value = s.id; o.textContent = s.name; o.selected = s.id === siteId;
+    sel.appendChild(o);
+  }
+  sel.addEventListener('change', () => { location.search = '?site=' + sel.value; });
+}
+
 // ---------- loading ----------
-const files = ['data/meta.json','data/heights.json','data/buildings.json'];
-const texFiles = ['data/texture_aerial.jpg','data/texture_topo.jpg','data/texture_roads.jpg','data/contours.png'];
-let loaded = 0; const total = files.length + texFiles.length;
 const barfill = document.getElementById('barfill');
-function tick(){ loaded++; barfill.style.width = (loaded/total*100)+'%'; }
-
+let loaded = 0, total = 8;
+function tick(){ loaded++; barfill.style.width = (loaded / total * 100) + '%'; }
 const texLoader = new THREE.TextureLoader();
-function loadTex(u){ return new Promise((res, rej) => texLoader.load(u, t => { tick(); res(t); }, undefined, rej)); }
-async function loadJson(u){ const r = await fetch(u); const j = await r.json(); tick(); return j; }
+const loadTex = u => new Promise((res, rej) => texLoader.load(u, t => { tick(); res(t); }, undefined, rej));
+const loadJson = async u => { const j = await (await fetch(u)).json(); tick(); return j; };
 
-const [meta, heights, buildings] = await Promise.all(files.map(loadJson));
-const [tA, tT, tR, tC] = await Promise.all(texFiles.map(loadTex));
-for (const t of [tA, tT, tR]) t.colorSpace = THREE.SRGBColorSpace;
+const [meta, heights, buildings, vegetation] = await Promise.all(
+  ['meta.json', 'heights.json', 'buildings.json', 'vegetation.json'].map(f => loadJson(D + f)));
+const hasRoads = meta.roads_rect && meta.roads_rect[2] > meta.roads_rect[0];
+const [tA, tT, tC] = await Promise.all(
+  ['texture_aerial.jpg', 'texture_topo.jpg', 'contours.png'].map(f => loadTex(D + f)));
+let tR = null;
+if (hasRoads) { try { tR = await loadTex(D + 'texture_roads.jpg'); } catch (e) {} }
+else tick();
+for (const t of [tA, tT, tR]) if (t) t.colorSpace = THREE.SRGBColorSpace;
 tA.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+document.getElementById('placeName').textContent = meta.place;
+document.title = meta.place + ' — דגם תלת־ממדי';
 
 // ---------- terrain ----------
 const GW = heights.gw, GH = heights.gh, Z = heights.z;
 const WW = meta.world_w, WH = meta.world_h;
 const ZMIN = meta.zmin;
-let EX = 1.5;
-const SKIRT = 25; // m below zmin
+let EX = 2;
+const SKIRT = 25;
 
-// grid + skirt geometry
-const cols = GW + 2, rows = GH + 2; // extra border ring for skirt
-const nVerts = cols * rows;
-const pos = new Float32Array(nVerts * 3);
-const uv = new Float32Array(nVerts * 2);
-function gridZ(i, j){ // clamped
-  const ii = Math.min(GH-1, Math.max(0, i)), jj = Math.min(GW-1, Math.max(0, j));
-  return Z[ii*GW + jj];
+const cols = GW + 2, rows = GH + 2;
+const pos = new Float32Array(cols * rows * 3);
+const uv = new Float32Array(cols * rows * 2);
+const vIndex = (i, j) => i * cols + j;
+function gridZ(i, j){
+  return Z[Math.min(GH - 1, Math.max(0, i)) * GW + Math.min(GW - 1, Math.max(0, j))];
 }
-function vIndex(i, j){ return i * cols + j; }
 function fillPositions(){
   for (let i = -1; i <= GH; i++){
     for (let j = -1; j <= GW; j++){
-      const ci = Math.min(GH-1, Math.max(0, i)), cj = Math.min(GW-1, Math.max(0, j));
-      const x = (cj/(GW-1) - 0.5) * WW;
-      const zc = (ci/(GH-1) - 0.5) * WH;
+      const ci = Math.min(GH - 1, Math.max(0, i)), cj = Math.min(GW - 1, Math.max(0, j));
       const skirt = (i < 0 || i >= GH || j < 0 || j >= GW);
-      const y = skirt ? -SKIRT : (gridZ(i, j) - ZMIN) * EX;
-      const k = vIndex(i+1, j+1) * 3;
-      pos[k] = x; pos[k+1] = y; pos[k+2] = zc;
+      const k = vIndex(i + 1, j + 1) * 3;
+      pos[k] = (cj / (GW - 1) - 0.5) * WW;
+      pos[k + 1] = skirt ? -SKIRT : (gridZ(i, j) - ZMIN) * EX;
+      pos[k + 2] = (ci / (GH - 1) - 0.5) * WH;
     }
   }
 }
 fillPositions();
 for (let i = -1; i <= GH; i++){
   for (let j = -1; j <= GW; j++){
-    const ci = Math.min(GH-1, Math.max(0, i)), cj = Math.min(GW-1, Math.max(0, j));
-    const k = vIndex(i+1, j+1) * 2;
-    uv[k] = cj/(GW-1); uv[k+1] = 1 - ci/(GH-1);
+    const ci = Math.min(GH - 1, Math.max(0, i)), cj = Math.min(GW - 1, Math.max(0, j));
+    const k = vIndex(i + 1, j + 1) * 2;
+    uv[k] = cj / (GW - 1); uv[k + 1] = 1 - ci / (GH - 1);
   }
 }
 const idx = [];
-for (let i = 0; i < rows-1; i++){
-  for (let j = 0; j < cols-1; j++){
-    const a = vIndex(i,j), b = vIndex(i,j+1), c2 = vIndex(i+1,j), d = vIndex(i+1,j+1);
+for (let i = 0; i < rows - 1; i++)
+  for (let j = 0; j < cols - 1; j++){
+    const a = vIndex(i, j), b = vIndex(i, j + 1), c2 = vIndex(i + 1, j), d = vIndex(i + 1, j + 1);
     idx.push(a, c2, b, b, c2, d);
   }
-}
+const skirtFlag = new Float32Array(cols * rows);
+for (let i = -1; i <= GH; i++)
+  for (let j = -1; j <= GW; j++)
+    skirtFlag[vIndex(i + 1, j + 1)] = (i < 0 || i >= GH || j < 0 || j >= GW) ? 1 : 0;
 const geo = new THREE.BufferGeometry();
 geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
 geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+geo.setAttribute('aSkirt', new THREE.BufferAttribute(skirtFlag, 1));
 geo.setIndex(idx);
 geo.computeVertexNormals();
 
 const uni = {
-  tA: { value: tA }, tT: { value: tT }, tR: { value: tR }, tC: { value: tC },
+  tA: { value: tA }, tT: { value: tT }, tR: { value: tR || tT }, tC: { value: tC },
   wT: { value: 0 }, wR: { value: 0 }, wC: { value: 0 },
-  roadsRect: { value: new THREE.Vector4(...meta.roads_rect) },
+  roadsRect: { value: new THREE.Vector4(...(meta.roads_rect || [0, 0, 0, 0])) },
   lightDir: { value: new THREE.Vector3(0.45, 0.75, -0.3).normalize() },
   fogColor: { value: new THREE.Color(0x0e141c) },
   fogNear: { value: 2200 }, fogFar: { value: 4200 },
@@ -192,9 +225,11 @@ const uni = {
 const terrainMat = new THREE.ShaderMaterial({
   uniforms: uni,
   vertexShader: `
-    varying vec2 vUv; varying vec3 vN; varying float vDist;
+    attribute float aSkirt;
+    varying vec2 vUv; varying vec3 vN; varying float vDist; varying float vSkirt;
     void main(){
       vUv = uv;
+      vSkirt = aSkirt;
       vN = normalize(normalMatrix * normal);
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
       vDist = -mv.z;
@@ -205,77 +240,93 @@ const terrainMat = new THREE.ShaderMaterial({
     uniform float wT, wR, wC, fogNear, fogFar;
     uniform vec4 roadsRect;
     uniform vec3 lightDir, fogColor;
-    varying vec2 vUv; varying vec3 vN; varying float vDist;
+    varying vec2 vUv; varying vec3 vN; varying float vDist; varying float vSkirt;
     void main(){
       vec3 col = texture2D(tA, vUv).rgb;
-      vec3 topo = texture2D(tT, vUv).rgb;
-      col = mix(col, topo, wT);
-      if (vUv.x > roadsRect.x && vUv.y > 1.0-roadsRect.w && vUv.x < roadsRect.z && vUv.y < 1.0-roadsRect.y){
-        vec3 rd = texture2D(tR, vUv).rgb;
-        col = mix(col, rd, wR);
+      col = mix(col, texture2D(tT, vUv).rgb, wT);
+      if (vUv.x > roadsRect.x && vUv.y > 1.0 - roadsRect.w && vUv.x < roadsRect.z && vUv.y < 1.0 - roadsRect.y){
+        col = mix(col, texture2D(tR, vUv).rgb, wR);
       }
-      float cont = texture2D(tC, vUv).r;
-      col = mix(col, vec3(0.55, 0.30, 0.12), cont * wC);
+      col = mix(col, vec3(0.55, 0.30, 0.12), texture2D(tC, vUv).r * wC);
       vec3 n = normalize(vN);
-      float diff = 0.55 + 0.5 * max(dot(n, lightDir), 0.0);
-      col *= diff;
-      // darken near-vertical skirt walls -> clean diorama base
-      col *= smoothstep(0.05, 0.35, abs(n.y)) * 0.75 + 0.25;
+      col *= 0.55 + 0.5 * max(dot(n, lightDir), 0.0);
+      // diorama walls: solid dark slate instead of stretched texture
+      col = mix(col, vec3(0.13, 0.15, 0.18), clamp(vSkirt * 4.0, 0.0, 1.0));
       float f = smoothstep(fogNear, fogFar, vDist);
       gl_FragColor = vec4(mix(col, fogColor, f), 1.0);
     }`,
 });
-const terrain = new THREE.Mesh(geo, terrainMat);
-scene.add(terrain);
+scene.add(new THREE.Mesh(geo, terrainMat));
 
-// height sampling (bilinear) in world coords
 function terrainH(x, z){
-  const fj = (x / WW + 0.5) * (GW - 1);
-  const fi = (z / WH + 0.5) * (GH - 1);
-  const i0 = Math.min(GH-2, Math.max(0, Math.floor(fi)));
-  const j0 = Math.min(GW-2, Math.max(0, Math.floor(fj)));
+  const fj = (x / WW + 0.5) * (GW - 1), fi = (z / WH + 0.5) * (GH - 1);
+  const i0 = Math.min(GH - 2, Math.max(0, Math.floor(fi)));
+  const j0 = Math.min(GW - 2, Math.max(0, Math.floor(fj)));
   const di = fi - i0, dj = fj - j0;
-  const h = Z[i0*GW+j0]*(1-di)*(1-dj) + Z[i0*GW+j0+1]*(1-di)*dj
-          + Z[(i0+1)*GW+j0]*di*(1-dj) + Z[(i0+1)*GW+j0+1]*di*dj;
-  return (h - ZMIN);
+  return Z[i0 * GW + j0] * (1 - di) * (1 - dj) + Z[i0 * GW + j0 + 1] * (1 - di) * dj
+       + Z[(i0 + 1) * GW + j0] * di * (1 - dj) + Z[(i0 + 1) * GW + j0 + 1] * di * dj - ZMIN;
 }
+const ovToWorld = (ox, oy) => [(ox / meta.ow - 0.5) * WW, (oy / meta.oh - 0.5) * WH];
 
-// ---------- buildings ----------
-const cells = buildings.cells;
-const cellSize = buildings.size_m;
+// ---------- buildings: rotated footprint boxes, TRUE height (not exaggerated) ----------
+const rects = buildings.rects || [];
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 boxGeo.translate(0, 0.5, 0);
-const bldMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-const inst = new THREE.InstancedMesh(boxGeo, bldMat, cells.length);
+const bld = new THREE.InstancedMesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), rects.length);
 const tmp = new THREE.Object3D();
-const cTint = new THREE.Color();
+const tint = new THREE.Color();
 function placeBuildings(){
-  const hEx = 1 + (EX - 1) * 0.45;  // buildings grow slower than terrain exaggeration
-  for (let k = 0; k < cells.length; k++){
-    const [ox, oy, h] = cells[k];
-    const x = (ox/meta.ow - 0.5) * WW;
-    const z = (oy/meta.oh - 0.5) * WH;
-    const base = terrainH(x, z) * EX;
-    tmp.position.set(x, base - 1, z);
-    tmp.scale.set(cellSize * 1.15, (h + 1) * hEx, cellSize * 1.15);
-    tmp.rotation.y = 0;
+  for (let k = 0; k < rects.length; k++){
+    const [ox, oy, wm, hm, ang, hgt] = rects[k];
+    const [x, z] = ovToWorld(ox, oy);
+    tmp.position.set(x, terrainH(x, z) * EX - 0.8, z);
+    tmp.scale.set(Math.max(wm, 2.2), hgt + 0.8, Math.max(hm, 2.2));
+    tmp.rotation.set(0, -THREE.MathUtils.degToRad(ang), 0);
     tmp.updateMatrix();
-    inst.setMatrixAt(k, tmp.matrix);
+    bld.setMatrixAt(k, tmp.matrix);
   }
-  inst.instanceMatrix.needsUpdate = true;
+  bld.instanceMatrix.needsUpdate = true;
 }
-for (let k = 0; k < cells.length; k++){
+for (let k = 0; k < rects.length; k++){
   const v = 0.62 + ((k * 2654435761) % 100) / 100 * 0.2;
-  cTint.setRGB(v, v * 0.95, v * 0.85);
-  inst.setColorAt(k, cTint);
+  tint.setRGB(v, v * 0.95, v * 0.85);
+  bld.setColorAt(k, tint);
 }
 placeBuildings();
-scene.add(inst);
+scene.add(bld);
 
-// ---------- camera reset ----------
+// ---------- vegetation: trees (cones) + shrubs (spheres), true heights ----------
+const veg = vegetation.items || [];
+const trees = veg.filter(v => v[4] === 1), shrubs = veg.filter(v => v[4] === 0);
+const treeGeo = new THREE.ConeGeometry(0.5, 1, 7);
+treeGeo.translate(0, 0.5, 0);
+const shrubGeo = new THREE.SphereGeometry(0.5, 7, 5);
+shrubGeo.scale(1, 0.7, 1);
+shrubGeo.translate(0, 0.3, 0);
+const treeMesh = new THREE.InstancedMesh(treeGeo, new THREE.MeshLambertMaterial({ color: 0x2d5a27 }), trees.length);
+const shrubMesh = new THREE.InstancedMesh(shrubGeo, new THREE.MeshLambertMaterial({ color: 0x5a6b33 }), shrubs.length);
+function placeVeg(){
+  const put = (mesh, list) => {
+    for (let k = 0; k < list.length; k++){
+      const [ox, oy, r, h] = list[k];
+      const [x, z] = ovToWorld(ox, oy);
+      tmp.position.set(x, terrainH(x, z) * EX - 0.3, z);
+      tmp.scale.set(r * 2, h, r * 2);
+      tmp.rotation.set(0, (k * 0.71) % 6.28, 0);
+      tmp.updateMatrix();
+      mesh.setMatrixAt(k, tmp.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  };
+  put(treeMesh, trees); put(shrubMesh, shrubs);
+}
+placeVeg();
+scene.add(treeMesh); scene.add(shrubMesh);
+
+// ---------- camera ----------
 function resetView(){
-  controls.target.set(0, 40 * EX, 0);
-  camera.position.set(WW * 0.12, 620 * EX * 0.7, WH * 0.85);
+  controls.target.set(0, 40, 0);
+  camera.position.set(WW * 0.12, 420 + 90 * EX, WH * 0.85);
   controls.update();
 }
 resetView();
@@ -284,27 +335,36 @@ resetView();
 const $ = id => document.getElementById(id);
 $('ex').addEventListener('input', e => {
   EX = parseFloat(e.target.value);
-  $('exV').textContent = '×' + EX.toFixed(1);
+  $('exV').textContent = '×' + EX.toFixed(2).replace(/\.?0+$/, '');
   fillPositions();
   geo.attributes.position.needsUpdate = true;
   geo.computeVertexNormals();
-  placeBuildings();
+  placeBuildings(); placeVeg();
 });
-$('wt').addEventListener('input', e => { uni.wT.value = parseFloat(e.target.value); $('wtV').textContent = Math.round(e.target.value*100)+'%'; });
-$('wr').addEventListener('input', e => { uni.wR.value = parseFloat(e.target.value); $('wrV').textContent = Math.round(e.target.value*100)+'%'; });
-$('tBld').addEventListener('click', () => { inst.visible = !inst.visible; $('tBld').classList.toggle('on', inst.visible); });
+$('wt').addEventListener('input', e => { uni.wT.value = +e.target.value; $('wtV').textContent = Math.round(e.target.value * 100) + '%'; });
+if (hasRoads && tR){
+  $('wr').addEventListener('input', e => { uni.wR.value = +e.target.value; $('wrV').textContent = Math.round(e.target.value * 100) + '%'; });
+} else {
+  $('roadsRow').style.display = 'none';
+}
+$('tBld').addEventListener('click', () => { bld.visible = !bld.visible; $('tBld').classList.toggle('on', bld.visible); });
+$('tVeg').addEventListener('click', () => {
+  const v = !treeMesh.visible;
+  treeMesh.visible = shrubMesh.visible = v;
+  $('tVeg').classList.toggle('on', v);
+});
 $('tCont').addEventListener('click', () => {
-  const on = uni.wC.value === 0; uni.wC.value = on ? 0.85 : 0;
+  const on = uni.wC.value === 0;
+  uni.wC.value = on ? 0.85 : 0;
   $('tCont').classList.toggle('on', on);
 });
 $('resetBtn').addEventListener('click', resetView);
-$('panelHead').addEventListener('click', () => {
-  const p = $('panel'); p.classList.toggle('closed');
-  $('panelArrow').textContent = p.classList.contains('closed') ? '▴' : '▾';
-});
+const panel = $('panel');
+$('fab').addEventListener('click', () => panel.classList.toggle('hidden'));
+if (innerWidth < 640) panel.classList.add('hidden');
 
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
+  camera.aspect = innerWidth / Math.max(innerHeight, 1);
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
@@ -316,8 +376,8 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
-// debug hook: manual render + downscaled snapshot (works even when rAF is throttled)
-window.__app = { renderer, scene, camera, controls, resetView };
+// debug hook: manual render + downscaled snapshot (works when rAF is throttled)
+window.__app = { renderer, scene, camera, controls, resetView, uni, EX: () => EX };
 window.__snap = (w = 320, q = 0.6) => {
   if (renderer.domElement.width < 8) {
     renderer.setSize(1280, 720, false);
@@ -326,10 +386,9 @@ window.__snap = (w = 320, q = 0.6) => {
   }
   renderer.render(scene, camera);
   const src = renderer.domElement;
-  const h = Math.round(w * src.height / src.width);
   const c2 = document.createElement('canvas');
-  c2.width = w; c2.height = h;
-  c2.getContext('2d').drawImage(src, 0, 0, w, h);
+  c2.width = w; c2.height = Math.round(w * src.height / src.width);
+  c2.getContext('2d').drawImage(src, 0, 0, c2.width, c2.height);
   return c2.toDataURL('image/jpeg', q);
 };
 </script>
