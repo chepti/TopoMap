@@ -288,8 +288,12 @@ def shadow_dir_and_masks(mos):
     b, g2, r = mos[..., 0].astype(np.int16), mos[..., 1].astype(np.int16), mos[..., 2].astype(np.int16)
     exg = 2 * g2 - r - b
     veg = ((exg > 18) | ((H > 35) & (H < 90) & (S > 60))) & valid
-    vth = np.percentile(V[valid], 15)
-    shadow = ((V < vth) & valid)
+    # "shadow" run also counts visible facades: the imagery is slightly oblique,
+    # so building walls show as dark/gray strips next to the roof — their length
+    # is proportional to the number of floors
+    vth = np.percentile(V[valid], 22)
+    facade = (S < 70) & (V < np.percentile(V[valid], 40)) & ~veg
+    shadow = (((V < vth) | facade) & valid)
     bth = np.percentile(V[valid], 35)
     built = ((V > bth) & (S < 95) & ~veg & valid).astype(np.uint8)
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
@@ -348,10 +352,12 @@ def extract_buildings(mos, px_m, to_ov):
         if med_run > 0:
             runs_all.append(med_run)
     global_med = float(np.median(runs_all)) if runs_all else 4.0
-    print(f"  buildings: {len(comps)} components, median shadow run {global_med:.1f}px")
+    print(f"  buildings: {len(comps)} components, median facade/shadow run {global_med:.1f}px")
+    FLOOR_M = 3.1
     for pts, med_run in comps:
-        hgt = 3.0 + np.clip(med_run / global_med, 0, 2.4) * 2.3 if med_run > 0 else 3.5
-        hgt = float(np.clip(hgt, 2.8, 9.5))
+        # quantize to whole floors: median building = 2 floors
+        floors = int(np.clip(round(med_run / global_med * 2), 1, 4)) if med_run > 0 else 1
+        hgt = float(floors * FLOOR_M + 0.4)
         rect = cv2.minAreaRect(pts.astype(np.float32))
         (cx, cy), (rw, rh), ang = rect
         rw_m, rh_m = rw * px_m, rh * px_m
@@ -372,8 +378,7 @@ def extract_buildings(mos, px_m, to_ov):
             for k2 in range(nsplit):
                 f = (k2 + 0.5) / nsplit - 0.5
                 rects.append((cx + ux * f * Lpx, cy + uy * f * Lpx,
-                              (Lpx / nsplit) * px_m, Spx * px_m, ang,
-                              float(np.clip(hgt + (k2 % 3 - 1) * 0.6, 2.8, 9.5))))
+                              (Lpx / nsplit) * px_m, Spx * px_m, ang, hgt))
     s, ox, oy = to_ov
     out = []
     for (cx, cy, rw_m, rh_m, ang, hgt) in rects:

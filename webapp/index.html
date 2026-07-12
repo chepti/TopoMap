@@ -52,6 +52,25 @@
   #bar { width:220px; height:6px; background:#243040; border-radius:3px; overflow:hidden; }
   #barfill { height:100%; width:0%; background:#4da3ff; transition:width .2s; }
   #credit { position:fixed; bottom:4px; left:8px; z-index:4; color:#7a8ea3; font-size:10px; direction:ltr; }
+  #zoomBar {
+    position:fixed; left:10px; top:50%; transform:translateY(-50%); z-index:6;
+    width:44px; height:280px; border-radius:22px;
+    background:rgba(10,14,20,.72); backdrop-filter:blur(8px);
+    display:flex; flex-direction:column; align-items:center; justify-content:space-between;
+    padding:6px 0; user-select:none;
+  }
+  #zoomBar.hidden { display:none; }
+  .zbtn {
+    width:32px; height:32px; border-radius:50%; border:none; cursor:pointer;
+    background:rgba(255,255,255,.09); color:#cfe0f3; font-size:17px; line-height:1;
+  }
+  .zbtn:active { background:#2b6cb0; }
+  #zoomTrack { position:relative; flex:1; width:100%; margin:6px 0; }
+  #zoomSlider {
+    position:absolute; top:50%; left:50%; width:150px; margin:0;
+    transform:translate(-50%,-50%) rotate(-90deg);
+    accent-color:#4da3ff;
+  }
 </style>
 </head>
 <body>
@@ -63,6 +82,13 @@
 </div>
 
 <button id="fab" title="פקדים">🎛</button>
+
+<div id="zoomBar">
+  <button class="zbtn" id="zHide" title="הסתרת הסרגל">✕</button>
+  <button class="zbtn" id="zIn" title="התקרבות">＋</button>
+  <div id="zoomTrack"><input id="zoomSlider" type="range" min="0" max="1000" step="1" value="500"></div>
+  <button class="zbtn" id="zOut" title="התרחקות">－</button>
+</div>
 
 <div id="panel">
   <div class="row" id="siteRow" style="display:none">
@@ -85,6 +111,7 @@
     <div class="tbtn on" id="tBld">בתים</div>
     <div class="tbtn on" id="tVeg">צמחייה</div>
     <div class="tbtn" id="tCont">קווי גובה</div>
+    <div class="tbtn on" id="tZoom">סרגל זום</div>
   </div>
   <button id="resetBtn">איפוס מבט</button>
 </div>
@@ -118,8 +145,11 @@ const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI * 0.49;
-controls.minDistance = 40;
+controls.minDistance = 15;
 controls.maxDistance = 3200;
+controls.zoomSpeed = 0.65;        // gentler wheel steps
+controls.zoomToCursor = true;     // zoom toward the point under the cursor
+controls.screenSpacePanning = false;
 
 scene.add(new THREE.HemisphereLight(0xbfd6ee, 0x36322a, 0.9));
 const sun = new THREE.DirectionalLight(0xffefd0, 1.4);
@@ -363,6 +393,42 @@ const panel = $('panel');
 $('fab').addEventListener('click', () => panel.classList.toggle('hidden'));
 if (innerWidth < 640) panel.classList.add('hidden');
 
+// ---------- distance ruler (log scale; top = close) ----------
+const zoomBar = $('zoomBar'), zSlider = $('zoomSlider');
+const MIND = controls.minDistance, MAXD = controls.maxDistance;
+const lnMin = Math.log(MIND), lnMax = Math.log(MAXD);
+const camDist = () => camera.position.distanceTo(controls.target);
+function setDistance(d){
+  d = Math.min(MAXD, Math.max(MIND, d));
+  const dir = camera.position.clone().sub(controls.target);
+  if (dir.lengthSq() < 1e-6) dir.set(0, 1, 0);
+  dir.normalize().multiplyScalar(d);
+  camera.position.copy(controls.target).add(dir);
+  controls.update();
+}
+let draggingSlider = false;
+function syncSlider(){
+  if (draggingSlider) return;
+  const v = 1000 * (1 - (Math.log(camDist()) - lnMin) / (lnMax - lnMin));
+  zSlider.value = Math.round(Math.min(1000, Math.max(0, v)));
+}
+zSlider.addEventListener('pointerdown', () => { draggingSlider = true; });
+addEventListener('pointerup', () => { draggingSlider = false; });
+zSlider.addEventListener('input', () => {
+  const f = 1 - zSlider.value / 1000;
+  setDistance(Math.exp(lnMin + f * (lnMax - lnMin)));
+});
+$('zIn').addEventListener('click', () => { setDistance(camDist() * 0.75); syncSlider(); });
+$('zOut').addEventListener('click', () => { setDistance(camDist() / 0.75); syncSlider(); });
+controls.addEventListener('change', syncSlider);
+syncSlider();
+function setZoomBar(on){
+  zoomBar.classList.toggle('hidden', !on);
+  $('tZoom').classList.toggle('on', on);
+}
+$('zHide').addEventListener('click', () => setZoomBar(false));
+$('tZoom').addEventListener('click', () => setZoomBar(zoomBar.classList.contains('hidden')));
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth / Math.max(innerHeight, 1);
   camera.updateProjectionMatrix();
@@ -373,6 +439,10 @@ document.getElementById('load').remove();
 
 renderer.setAnimationLoop(() => {
   controls.update();
+  // keep the camera above the terrain (prevents diving under / flipped view)
+  const minY = terrainH(camera.position.x, camera.position.z) * EX + 6;
+  if (camera.position.y < minY) camera.position.y = minY;
+  if (controls.target.y < 0) controls.target.y = 0;
   renderer.render(scene, camera);
 });
 
