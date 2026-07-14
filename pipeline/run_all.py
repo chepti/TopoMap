@@ -252,19 +252,31 @@ def find_blue_markers(img):
             out.append((x + w2 / 2, y + h2 / 2))
     return out
 
-def topo_to_overview_transform(topo, overview, manual, pairs=None):
+def _sim_affine(s, ox, oy):
+    """scale+translate (no rotation) -> 2x3 affine [[s,0,ox],[0,s,oy]]."""
+    return np.array([[s, 0.0, ox], [0.0, s, oy]], float)
+
+def topo_to_overview_transform(topo, overview, manual, pairs=None, affine=None):
+    """Return a 2x3 affine A mapping topo pixels -> overview pixels
+    (ov = A @ [tx, ty, 1]). Supports rotation via the studio overlay (affine)."""
+    if affine and len(affine) == 6:
+        a = np.array(affine, float).reshape(2, 3)
+        sc = float(np.hypot(a[0, 0], a[1, 0]))
+        rot = float(np.degrees(np.arctan2(a[1, 0], a[0, 0])))
+        print(f"  topo->overview (studio overlay): scale={sc:.4f} rot={rot:.1f}deg off=({a[0,2]:.1f},{a[1,2]:.1f})")
+        return a
     if manual:
-        return tuple(manual)
+        return _sim_affine(*manual)
     if pairs and len(pairs) >= 2:
-        # least-squares similarity (no rotation: both maps are north-up) from
+        # least-squares full similarity (scale+rotation+translation) from
         # user-clicked matching points [[tx,ty,ox,oy],...]
-        t = np.array([[p[0], p[1]] for p in pairs], float)
-        o = np.array([[p[2], p[3]] for p in pairs], float)
-        dt = t - t.mean(axis=0); do = o - o.mean(axis=0)
-        s = float(np.sqrt((do ** 2).sum() / max((dt ** 2).sum(), 1e-9)))
-        off = o.mean(axis=0) - s * t.mean(axis=0)
-        print(f"  topo->overview (from {len(pairs)} pairs): scale={s:.4f} off=({off[0]:.1f},{off[1]:.1f})")
-        return s, float(off[0]), float(off[1])
+        src = np.array([[p[0], p[1]] for p in pairs], np.float32).reshape(-1, 1, 2)
+        dst = np.array([[p[2], p[3]] for p in pairs], np.float32).reshape(-1, 1, 2)
+        M, _ = cv2.estimateAffinePartial2D(src, dst)
+        if M is not None:
+            sc = float(np.hypot(M[0, 0], M[1, 0]))
+            print(f"  topo->overview (from {len(pairs)} pairs): scale={sc:.4f}")
+            return M.astype(float)
     mt = find_blue_markers(topo); mo = find_blue_markers(overview)
     best = None
     for (a1, a2) in itertools.permutations(mt, 2):
@@ -281,9 +293,9 @@ def topo_to_overview_transform(topo, overview, manual, pairs=None):
                     off = np.array(b1) - s * np.array(a1)
                     best = (err, s, float(off[0]), float(off[1]))
     if best is None:
-        raise SystemExit("no matching blue markers topo<->overview; add topo_to_overview to config")
+        raise SystemExit("no matching blue markers topo<->overview; use the studio overlay or add topo_affine/topo_to_overview to config")
     print(f"  topo->overview: scale={best[1]:.4f} off=({best[2]:.1f},{best[3]:.1f})")
-    return best[1], best[2], best[3]
+    return _sim_affine(best[1], best[2], best[3])
 
 def inpaint_blue(img):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -439,7 +451,9 @@ def compose(outdir, overview, mosaic, to_ov, topo, t2o, roads, r2o, cmask,
             dem, km_px, bld, vegj, name):
     os.makedirs(outdir, exist_ok=True)
     OH, OW = overview.shape[:2]
-    m_per_ovpx = (1000.0 / km_px) / t2o[0]
+    A = np.asarray(t2o, float)                       # topo px -> overview px (2x3 affine)
+    t2o_scale = float(np.hypot(A[0, 0], A[1, 0]))    # similarity scale
+    m_per_ovpx = (1000.0 / km_px) / t2o_scale
     TEXW = 4096; SF = TEXW / OW; TEXH = int(round(OH * SF))
     base = cv2.resize(overview, (TEXW, TEXH), interpolation=cv2.INTER_CUBIC)
     a = to_ov[0] * SF
@@ -451,8 +465,8 @@ def compose(outdir, overview, mosaic, to_ov, topo, t2o, roads, r2o, cmask,
     cv2.imencode(".jpg", aerial, [cv2.IMWRITE_JPEG_QUALITY, 82])[1].tofile(os.path.join(outdir, "texture_aerial.jpg"))
 
     T2W = 2048; SF2 = T2W / OW; T2H = int(round(OH * SF2))
-    a = t2o[0] * SF2
-    Mt = np.float32([[a, 0, t2o[1] * SF2], [0, a, t2o[2] * SF2]])
+    # topo -> texture frame = (overview px * SF2); M_tex = SF2 * A
+    Mt = (SF2 * A).astype(np.float32)
     topo_t = cv2.warpAffine(topo, Mt, (T2W, T2H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
     cv2.imencode(".jpg", topo_t, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tofile(os.path.join(outdir, "texture_topo.jpg"))
     cont_t = cv2.warpAffine(cmask, Mt, (T2W, T2H), flags=cv2.INTER_LINEAR)
@@ -471,7 +485,11 @@ def compose(outdir, overview, mosaic, to_ov, topo, t2o, roads, r2o, cmask,
     th, tw = topo.shape[:2]
     GW, GH = 262, 196
     ovx, ovy = np.meshgrid(np.linspace(0, OW - 1, GW), np.linspace(0, OH - 1, GH))
-    tx = (ovx - t2o[1]) / t2o[0]; ty = (ovy - t2o[2]) / t2o[0]
+    # invert A (topo->ov) to map overview grid points back to topo px
+    A3 = np.vstack([A, [0, 0, 1]])
+    Ainv = np.linalg.inv(A3)
+    tx = Ainv[0, 0] * ovx + Ainv[0, 1] * ovy + Ainv[0, 2]
+    ty = Ainv[1, 0] * ovx + Ainv[1, 1] * ovy + Ainv[1, 2]
     mx = (tx / tw * (dem.shape[1] - 1)).astype(np.float32)
     my = (ty / th * (dem.shape[0] - 1)).astype(np.float32)
     hg = cv2.remap(dem.astype(np.float32), mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
@@ -554,10 +572,11 @@ def main():
     else:
         dem, cmask = build_dem(topo, anchors, km_px)
     t2o = topo_to_overview_transform(topo, imread(ov_p), cfg.get("topo_to_overview"),
-                                     cfg.get("align_pairs"))
+                                     cfg.get("align_pairs"), cfg.get("topo_affine"))
+    t2o_scale = float(np.hypot(t2o[0, 0], t2o[1, 0]))
 
     print("[5/6] buildings + vegetation")
-    px_m = (1000.0 / km_px) / t2o[0] * to_ov[0]  # meters per mosaic px
+    px_m = (1000.0 / km_px) / t2o_scale * to_ov[0]  # meters per mosaic px
     print(f"  mosaic GSD: {px_m:.3f} m/px")
     bld, veg, shadow, ddir, run = extract_buildings(mosaic, px_m, to_ov)
     vegj = extract_vegetation(mosaic, veg, run, ddir, px_m, to_ov)
