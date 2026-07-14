@@ -73,7 +73,8 @@ class H(http.server.SimpleHTTPRequestHandler):
             self.path = "/admin.html"
             return super().do_GET()
         if self.path.startswith("/input/"):
-            rel = self.path[len("/input/"):].split("?")[0]
+            from urllib.parse import unquote
+            rel = unquote(self.path[len("/input/"):].split("?")[0])
             full = os.path.normpath(os.path.join(INPUT, rel))
             if full.startswith(INPUT) and os.path.isfile(full):
                 self.send_response(200)
@@ -191,7 +192,8 @@ class H(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+PORT = int(os.environ.get("MAPS_PORT", "8123"))
 socketserver.ThreadingTCPServer.allow_reuse_address = True
-with socketserver.ThreadingTCPServer(("127.0.0.1", 8123), H) as srv:
-    print("studio on http://localhost:8123  (viewer: / , admin: /admin)")
+with socketserver.ThreadingTCPServer(("127.0.0.1", PORT), H) as srv:
+    print(f"studio on http://localhost:{PORT}  (viewer: / , admin: /admin)")
     srv.serve_forever()

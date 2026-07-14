@@ -77,8 +77,9 @@
   <div id="thumbs"></div>
   <div class="rowflex" style="margin-top:10px">
     <button id="classifyBtn" class="sec" disabled>זיהוי אוטומטי של סוגי התמונות</button>
-    <span class="hint">אחרי הזיהוי אפשר לתקן ידנית בכל תמונה</span>
+    <button id="toStep3" disabled>המשך לסימון גבהים ←</button>
   </div>
+  <div class="hint" id="rolesHint">אחרי הזיהוי אפשר לתקן ידנית בכל תמונה. צריך: מפה טופוגרפית אחת + תצלום אוויר אחד לפחות.</div>
 </div>
 
 <div class="card" id="cardAnchors" style="display:none">
@@ -151,6 +152,7 @@ async function upload(files){
   drop.onclick = () => document.getElementById('fileIn2').click();
   renderThumbs();
   $('classifyBtn').disabled = FILES.length < 2;
+  afterRoles();
 }
 
 function renderThumbs(){
@@ -176,6 +178,7 @@ $('classifyBtn').onclick = async () => {
   $('classifyBtn').textContent = 'מזהה…';
   const r = await (await fetch('/classify?site=' + SITE, { method: 'POST' })).json();
   if (r.error) { alert(r.error); return; }
+  SUGGEST = r;
   for (const f of FILES) ROLES[f] = 'aerial';
   if (r.topo) ROLES[r.topo] = 'topo';
   if (r.roads) ROLES[r.roads] = 'roads';
@@ -185,24 +188,38 @@ $('classifyBtn').onclick = async () => {
 };
 
 function roleFile(role){ return FILES.find(f => ROLES[f] === role); }
+function overviewFile(){
+  // explicit choice, else classify suggestion, else first aerial
+  return roleFile('overview') || (SUGGEST.overview && FILES.includes(SUGGEST.overview) ? SUGGEST.overview : null)
+      || FILES.find(f => (ROLES[f] || 'aerial') === 'aerial');
+}
 
+let SUGGEST = {};
+
+// enable "continue" once we have a topo and at least one aerial
 function afterRoles(){
-  const topo = roleFile('topo'), ov = roleFile('overview');
-  if (!topo || !ov) return;
+  const topo = roleFile('topo');
+  const nAerial = FILES.filter(f => (ROLES[f] || 'aerial') === 'aerial' || ROLES[f] === 'overview').length;
+  const ready = !!topo && nAerial >= 1;
+  $('toStep3').disabled = !ready;
+  $('rolesHint').innerHTML = ready
+    ? '✓ מוכן. אפשר לתקן סוגים ואז ללחוץ "המשך".'
+    : (!topo ? '⚠ צריך לסמן תמונה אחת כ<b>מפה טופוגרפית</b>.' : '⚠ צריך לפחות תצלום אוויר אחד.');
+}
+
+$('toStep3').onclick = () => {
+  const topo = roleFile('topo'), ov = overviewFile();
+  if (!topo || !ov) { alert('צריך מפה טופוגרפית ותצלום אוויר'); return; }
   $('cardAnchors').style.display = $('cardPairs').style.display = $('cardBuild').style.display = '';
   const ai = $('anchorImg');
-  if (!ai.src.includes(encodeURIComponent(topo))){
-    ai.src = `/input/${SITE}/${encodeURIComponent(topo)}`;
-    ai.onload = () => { natTopo = [ai.naturalWidth, ai.naturalHeight]; };
-    $('pairTopo').src = ai.src;
-    $('pairTopo').onload = () => {};
-  }
+  ai.src = `/input/${SITE}/${encodeURIComponent(topo)}`;
+  ai.onload = () => { natTopo = [ai.naturalWidth, ai.naturalHeight]; };
+  $('pairTopo').src = ai.src;
   const oi = $('pairOv');
-  if (!oi.src.includes(encodeURIComponent(ov))){
-    oi.src = `/input/${SITE}/${encodeURIComponent(ov)}`;
-    oi.onload = () => { natOv = [oi.naturalWidth, oi.naturalHeight]; };
-  }
-}
+  oi.src = `/input/${SITE}/${encodeURIComponent(ov)}`;
+  oi.onload = () => { natOv = [oi.naturalWidth, oi.naturalHeight]; };
+  $('cardAnchors').scrollIntoView({ behavior: 'smooth' });
+};
 
 // ---- anchors ----
 const wrap = $('anchorWrap'), elevBox = $('elevBox');
@@ -287,7 +304,7 @@ $('buildBtn').onclick = async () => {
   const config = {
     topo: topo,
     roads: roleFile('roads') || '',
-    overview: roleFile('overview') || undefined,
+    overview: overviewFile() || undefined,
     skip: FILES.filter(f => ROLES[f] === 'skip'),
     aerials: FILES.filter(f => (ROLES[f] || 'aerial') === 'aerial' || ROLES[f] === 'overview'),
     anchors: ANCHORS.map(a => [Math.round(a[0] * natTopo[0]), Math.round(a[1] * natTopo[1]), a[2]]),
