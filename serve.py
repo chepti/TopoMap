@@ -15,7 +15,7 @@ Local endpoints (not available on the public site):
   POST /publish?site=x         scp data/<site> + sites.json + index.html to Hostinger
   GET  /input/<site>/<file>    serve uploaded images
 """
-import base64, json, os, re, shutil, subprocess, threading
+import base64, contextlib, io, json, os, re, shutil, subprocess, threading
 import http.server, socketserver
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -142,13 +142,16 @@ class H(http.server.SimpleHTTPRequestHandler):
                 return self._json({"error": "no such site"}, 400)
             try:
                 import sys
-                sys.path.insert(0, os.path.join(ROOT, "pipeline"))
-                import run_all
-                import glob as g
-                paths = [p for p in g.glob(os.path.join(folder, "*"))
-                         if os.path.splitext(p)[1].lower() in (".jpg", ".jpeg", ".png", ".webp")]
-                topo, roads, aerials = run_all.classify(paths)
-                ov = min(aerials, key=lambda p: run_all.imread(p).shape[0] * run_all.imread(p).shape[1]) if aerials else None
+                # capture library print()/import chatter so a detached or closed
+                # server stdout can't raise (WinError 233 / broken pipe) mid-request
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+                    import run_all
+                    import glob as g
+                    paths = [p for p in g.glob(os.path.join(folder, "*"))
+                             if os.path.splitext(p)[1].lower() in (".jpg", ".jpeg", ".png", ".webp")]
+                    topo, roads, aerials = run_all.classify(paths)
+                    ov = min(aerials, key=lambda p: run_all.imread(p).shape[0] * run_all.imread(p).shape[1]) if aerials else None
                 return self._json({
                     "topo": os.path.basename(topo) if topo else None,
                     "roads": os.path.basename(roads) if roads else None,
