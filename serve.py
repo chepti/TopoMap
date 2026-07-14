@@ -196,7 +196,17 @@ class H(http.server.SimpleHTTPRequestHandler):
         pass
 
 PORT = int(os.environ.get("MAPS_PORT", "8123"))
-socketserver.ThreadingTCPServer.allow_reuse_address = True
-with socketserver.ThreadingTCPServer(("127.0.0.1", PORT), H) as srv:
+# NOT allow_reuse_address: on Windows SO_REUSEADDR lets a 2nd instance bind the
+# same port while the stale one keeps answering (with old code). Better to fail
+# loudly so the user knows an old server is still running.
+try:
+    srv = socketserver.ThreadingTCPServer(("127.0.0.1", PORT), H)
+except OSError as e:
+    print(f"\n*** לא ניתן לתפוס את פורט {PORT} — כנראה שרת ישן עדיין רץ. ***")
+    print("סגרי אותו ונסי שוב. לזיהוי והריגת התהליך התקוע (PowerShell):")
+    print(f"  Get-NetTCPConnection -LocalPort {PORT} -State Listen | "
+          f"ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force }}\n")
+    raise SystemExit(1)
+with srv:
     print(f"studio on http://localhost:{PORT}  (viewer: / , admin: /admin)")
     srv.serve_forever()
