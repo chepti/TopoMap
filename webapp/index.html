@@ -182,11 +182,11 @@ const loadJson = async u => { const j = await (await fetch(u)).json(); tick(); r
 
 const [meta, heights, buildings, vegetation] = await Promise.all(
   ['meta.json', 'heights.json', 'buildings.json', 'vegetation.json'].map(f => loadJson(D + f)));
-const hasRoads = meta.roads_rect && meta.roads_rect[2] > meta.roads_rect[0];
+const hasRoads = !!meta.has_roads;
 const [tA, tT, tC] = await Promise.all(
   ['texture_aerial.jpg', 'texture_topo.jpg', 'contours.png'].map(f => loadTex(D + f)));
 let tR = null;
-if (hasRoads) { try { tR = await loadTex(D + 'texture_roads.jpg'); } catch (e) {} }
+if (hasRoads) { try { tR = await loadTex(D + 'texture_roads.png'); } catch (e) {} }
 else tick();
 for (const t of [tA, tT, tR]) if (t) t.colorSpace = THREE.SRGBColorSpace;
 tA.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
@@ -247,7 +247,7 @@ geo.computeVertexNormals();
 const uni = {
   tA: { value: tA }, tT: { value: tT }, tR: { value: tR || tT }, tC: { value: tC },
   wT: { value: 0 }, wR: { value: 0 }, wC: { value: 0 },
-  roadsRect: { value: new THREE.Vector4(...(meta.roads_rect || [0, 0, 0, 0])) },
+  hasRoads: { value: (hasRoads && tR) ? 1 : 0 },
   lightDir: { value: new THREE.Vector3(0.45, 0.75, -0.3).normalize() },
   fogColor: { value: new THREE.Color(0x0e141c) },
   fogNear: { value: 2200 }, fogFar: { value: 4200 },
@@ -267,15 +267,15 @@ const terrainMat = new THREE.ShaderMaterial({
     }`,
   fragmentShader: `
     uniform sampler2D tA, tT, tR, tC;
-    uniform float wT, wR, wC, fogNear, fogFar;
-    uniform vec4 roadsRect;
+    uniform float wT, wR, wC, hasRoads, fogNear, fogFar;
     uniform vec3 lightDir, fogColor;
     varying vec2 vUv; varying vec3 vN; varying float vDist; varying float vSkirt;
     void main(){
       vec3 col = texture2D(tA, vUv).rgb;
       col = mix(col, texture2D(tT, vUv).rgb, wT);
-      if (vUv.x > roadsRect.x && vUv.y > 1.0 - roadsRect.w && vUv.x < roadsRect.z && vUv.y < 1.0 - roadsRect.y){
-        col = mix(col, texture2D(tR, vUv).rgb, wR);
+      if (hasRoads > 0.5){
+        vec4 rd = texture2D(tR, vUv);
+        col = mix(col, rd.rgb, wR * rd.a);
       }
       col = mix(col, vec3(0.55, 0.30, 0.12), texture2D(tC, vUv).r * wC);
       vec3 n = normalize(vN);
@@ -298,31 +298,62 @@ function terrainH(x, z){
 }
 const ovToWorld = (ox, oy) => [(ox / meta.ow - 0.5) * WW, (oy / meta.oh - 0.5) * WH];
 
-// ---------- buildings: rotated footprint boxes, TRUE height (not exaggerated) ----------
-const rects = buildings.rects || [];
-const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-boxGeo.translate(0, 0.5, 0);
-const bld = new THREE.InstancedMesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), rects.length);
+// ---------- buildings: extruded footprint PRISMS (real roof shape), TRUE height ----------
+// Each building is a polygon (from run_all) extruded from the terrain up to its
+// own height. All prisms are merged into one BufferGeometry (one draw call).
 const tmp = new THREE.Object3D();
-const tint = new THREE.Color();
-function placeBuildings(){
-  for (let k = 0; k < rects.length; k++){
-    const [ox, oy, wm, hm, ang, hgt] = rects[k];
-    const [x, z] = ovToWorld(ox, oy);
-    tmp.position.set(x, terrainH(x, z) * EX - 0.8, z);
-    tmp.scale.set(Math.max(wm, 2.2), hgt + 0.8, Math.max(hm, 2.2));
-    tmp.rotation.set(0, -THREE.MathUtils.degToRad(ang), 0);
-    tmp.updateMatrix();
-    bld.setMatrixAt(k, tmp.matrix);
+const polys = (buildings.polys || []).map(b => ({
+  // overview px -> world (x,z), keep footprint winding
+  pts: b.poly.map(([ox, oy]) => ovToWorld(ox, oy)),
+  h: b.h,
+}));
+const bldGeo = new THREE.BufferGeometry();
+const bPos = [], bCol = [];
+function signedArea(pts){
+  let a = 0;
+  for (let i = 0, n = pts.length; i < n; i++){
+    const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % n];
+    a += x1 * z2 - x2 * z1;
   }
-  bld.instanceMatrix.needsUpdate = true;
+  return a / 2;
 }
-for (let k = 0; k < rects.length; k++){
-  const v = 0.62 + ((k * 2654435761) % 100) / 100 * 0.2;
-  tint.setRGB(v, v * 0.95, v * 0.85);
-  bld.setColorAt(k, tint);
+function buildPrisms(){
+  bPos.length = 0; bCol.length = 0;
+  for (let k = 0; k < polys.length; k++){
+    let pts = polys[k].pts;
+    if (pts.length < 3) continue;
+    // ensure counter-clockwise for consistent up-normals
+    if (signedArea(pts) < 0) pts = pts.slice().reverse();
+    // ground = min terrain under the footprint (sit flat on slope)
+    let baseY = Infinity;
+    for (const [x, z] of pts) baseY = Math.min(baseY, terrainH(x, z) * EX);
+    baseY -= 0.6;
+    const topY = baseY + polys[k].h;
+    // per-building tint
+    const v = 0.6 + ((k * 2654435761 >>> 0) % 100) / 100 * 0.22;
+    const cr = v, cg = v * 0.95, cb = v * 0.85;
+    const pushV = (x, y, z) => { bPos.push(x, y, z); bCol.push(cr, cg, cb); };
+    // roof: fan triangulation (footprints are simple, near-convex)
+    const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+    const cz = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    for (let i = 0; i < pts.length; i++){
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      pushV(cx, topY, cz); pushV(a[0], topY, a[1]); pushV(b[0], topY, b[1]);
+    }
+    // walls: quad per edge, base -> top
+    for (let i = 0; i < pts.length; i++){
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      pushV(a[0], baseY, a[1]); pushV(b[0], baseY, b[1]); pushV(b[0], topY, b[1]);
+      pushV(a[0], baseY, a[1]); pushV(b[0], topY, b[1]); pushV(a[0], topY, a[1]);
+    }
+  }
+  bldGeo.setAttribute('position', new THREE.Float32BufferAttribute(bPos, 3));
+  bldGeo.setAttribute('color', new THREE.Float32BufferAttribute(bCol, 3));
+  bldGeo.computeVertexNormals();
 }
-placeBuildings();
+buildPrisms();
+const bld = new THREE.Mesh(bldGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+function placeBuildings(){ buildPrisms(); bldGeo.attributes.position.needsUpdate = true; }
 scene.add(bld);
 
 // ---------- vegetation: trees (cones) + shrubs (spheres), true heights ----------

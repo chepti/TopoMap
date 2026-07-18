@@ -319,13 +319,12 @@ def shadow_dir_and_masks(mos):
     vth = np.percentile(V[valid], 22)
     facade = (S < 70) & (V < np.percentile(V[valid], 40)) & ~veg
     shadow = (((V < vth) | facade) & valid)
-    bth = np.percentile(V[valid], 35)
-    built = ((V > bth) & (S < 95) & ~veg & valid).astype(np.uint8)
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
-    bo = cv2.morphologyEx(built, cv2.MORPH_OPEN, k)
-    bo = cv2.morphologyEx(bo, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
-    tex = cv2.GaussianBlur(np.abs(cv2.Laplacian(cv2.GaussianBlur(gray, (3, 3), 0), cv2.CV_32F)), (0, 0), 8)
-    bo = ((bo > 0) & (tex > np.percentile(tex[valid], 45))).astype(np.uint8)
+    bth = np.percentile(V[valid], 32)
+    built = ((V > bth) & (S < 100) & ~veg & valid).astype(np.uint8)
+    # dense built fabric: fill roof interiors/gaps first, then trim thin
+    # roads/paths — keep the urban block solid (watershed splits it later)
+    bo = cv2.morphologyEx(built, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    bo = cv2.morphologyEx(bo, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
     # shadow direction
     sh_u8 = shadow.astype(np.uint8)
     best = (None, -1)
@@ -349,67 +348,84 @@ def shadow_run_field(shadow, ddir, maxrun=34):
         run += (cur > 0)
     return run
 
+def _separate_buildings(bo, mos):
+    """Split the built mask into individual buildings via distance-transform
+    watershed (respects roof-to-roof edges in the imagery)."""
+    from scipy import ndimage
+    dist = cv2.distanceTransform(bo, cv2.DIST_L2, 5)
+    dist = cv2.GaussianBlur(dist, (0, 0), 2.0)
+    # seeds = local maxima of the distance transform (one per building core).
+    # size 15 -> ~one seed per building block, not per roof fragment
+    peak = (ndimage.maximum_filter(dist, size=15) == dist) & (dist > 3.0)
+    seeds, nseeds = ndimage.label(peak)
+    markers = np.zeros(bo.shape, np.int32)
+    markers[seeds > 0] = seeds[seeds > 0] + 1          # foreground seeds: 2..N+1
+    markers[cv2.dilate(bo, np.ones((3, 3), np.uint8), iterations=2) == 0] = 1  # background = 1
+    cv2.watershed(mos, markers)                          # floods along image edges
+    markers[bo == 0] = 0                                 # keep only built pixels
+    return markers, nseeds
+
 def extract_buildings(mos, px_m, to_ov):
     bo, veg, shadow, ddir = shadow_dir_and_masks(mos)
     run = shadow_run_field(shadow, ddir)
     dx, dy = ddir
     Wd, H = mos.shape[1], mos.shape[0]
-    n, labels, stats, cents = cv2.connectedComponentsWithStats(bo, 8)
-    rects = []
+    labels, nseeds = _separate_buildings(bo, mos)
+    ids = [i for i in np.unique(labels) if i >= 2]
+
+    # --- pass 1: geometry + shadow evidence per building ---
+    builds = []       # (poly_px Nx2, centroid, med_run)
     runs_all = []
-    comps = []
-    for i in range(1, n):
-        area = stats[i, cv2.CC_STAT_AREA]
-        if area < 60:  # < ~8.5 m^2
+    for i in ids:
+        mask = (labels == i).astype(np.uint8)
+        area = int(mask.sum())
+        if area < 55:                                    # < ~7.5 m^2
             continue
-        ys, xs = np.where(labels == i)
-        # shadow evidence along edge (search window past eroded edge)
-        pts = np.stack([xs, ys], axis=1)
+        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not cnts:
+            continue
+        c = max(cnts, key=cv2.contourArea)
+        peri = cv2.arcLength(c, True)
+        # simplify to the real roof shape (hexagon / trapezoid / L / rectangle+bump)
+        poly = cv2.approxPolyDP(c, 0.018 * peri, True).reshape(-1, 2).astype(np.float32)
+        if len(poly) < 3:
+            continue
+        if len(poly) > 10:                               # noisy blob -> convex hull
+            poly = cv2.convexHull(c).reshape(-1, 2).astype(np.float32)
+        # drop slivers
+        if cv2.contourArea(poly.astype(np.int32)) * px_m * px_m < 6:
+            continue
+        cx, cy = poly[:, 0].mean(), poly[:, 1].mean()
+        # shadow/facade run just past the down-sun edge
         rvals = []
-        sub = pts[:: max(1, len(pts) // 200)]
-        for (x, y) in sub:
-            for j in range(1, 9):
-                nx, ny = x + dx * j, y + dy * j
+        for (x, y) in poly:
+            for j in range(1, 10):
+                nx, ny = int(x + dx * j), int(y + dy * j)
                 if 0 <= nx < Wd and 0 <= ny < H and run[ny, nx] > 1:
                     rvals.append(run[ny, nx]); break
         med_run = float(np.median(rvals)) if rvals else 0.0
-        comps.append((pts, med_run))
+        builds.append((poly, (cx, cy), med_run))
         if med_run > 0:
             runs_all.append(med_run)
+
     global_med = float(np.median(runs_all)) if runs_all else 4.0
-    print(f"  buildings: {len(comps)} components, median facade/shadow run {global_med:.1f}px")
+    print(f"  buildings: {len(builds)} footprints, median facade/shadow run {global_med:.1f}px")
+
     FLOOR_M = 3.1
-    for pts, med_run in comps:
-        # quantize to whole floors: median building = 2 floors
-        floors = int(np.clip(round(med_run / global_med * 2), 1, 4)) if med_run > 0 else 1
-        hgt = float(floors * FLOOR_M + 0.4)
-        rect = cv2.minAreaRect(pts.astype(np.float32))
-        (cx, cy), (rw, rh), ang = rect
-        rw_m, rh_m = rw * px_m, rh * px_m
-        if rw_m < 2 or rh_m < 2:
-            continue
-        # split very large blobs into chunks along the long axis
-        L = max(rw_m, rh_m)
-        nsplit = max(1, int(round(L / 26)))
-        if nsplit == 1:
-            rects.append((cx, cy, rw_m, rh_m, ang, hgt))
-        else:
-            long_is_w = rw_m >= rh_m
-            th = np.radians(ang)
-            ux, uy = np.cos(th), np.sin(th)
-            if not long_is_w:
-                ux, uy = -np.sin(th), np.cos(th)
-            Lpx = max(rw, rh); Spx = min(rw, rh)
-            for k2 in range(nsplit):
-                f = (k2 + 0.5) / nsplit - 0.5
-                rects.append((cx + ux * f * Lpx, cy + uy * f * Lpx,
-                              (Lpx / nsplit) * px_m, Spx * px_m, ang, hgt))
     s, ox, oy = to_ov
     out = []
-    for (cx, cy, rw_m, rh_m, ang, hgt) in rects:
-        out.append([round(cx * s + ox, 2), round(cy * s + oy, 2),
-                    round(rw_m, 1), round(rh_m, 1), round(ang, 1), round(hgt, 1)])
-    print(f"  buildings out: {len(out)} rects")
+    for poly, (cx, cy), med_run in builds:
+        if med_run > 0:
+            floors = int(np.clip(round(med_run / global_med * 1.7), 1, 3))
+        else:
+            # no shadow evidence: 1-3 floors, deterministic from position
+            floors = 1 + (int(cx * 7.0 + cy * 13.0)) % 3
+        # per-building jitter so neighbours read as distinct volumes
+        jitter = (((int(cx * 131 + cy * 57)) % 9) - 4) * 0.25    # +-1.0 m
+        hgt = float(max(2.6, floors * FLOOR_M + 0.3 + jitter))
+        pts_ov = [[round(float(px) * s + ox, 1), round(float(py) * s + oy, 1)] for px, py in poly]
+        out.append({"poly": pts_ov, "h": round(hgt, 1)})
+    print(f"  buildings out: {len(out)} prisms")
     return out, veg, shadow, ddir, run
 
 def extract_vegetation(mos, veg, run, ddir, px_m, to_ov, max_items=3500):
@@ -472,15 +488,18 @@ def compose(outdir, overview, mosaic, to_ov, topo, t2o, roads, r2o, cmask,
     cont_t = cv2.warpAffine(cmask, Mt, (T2W, T2H), flags=cv2.INTER_LINEAR)
     cv2.imencode(".png", cont_t)[1].tofile(os.path.join(outdir, "contours.png"))
 
-    roads_rect = [0, 0, 0, 0]
+    has_roads = False
     if roads is not None and r2o is not None:
-        a = r2o[0] * SF2
-        Mt = np.float32([[a, 0, r2o[1] * SF2], [0, a, r2o[2] * SF2]])
-        roads_t = cv2.warpAffine(roads, Mt, (T2W, T2H), flags=cv2.INTER_CUBIC, borderValue=(255, 255, 255))
-        cv2.imencode(".jpg", roads_t, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tofile(os.path.join(outdir, "texture_roads.jpg"))
-        roads_rect = [max(0, r2o[1] / OW), max(0, r2o[2] / OH),
-                      min(1, (r2o[1] + roads.shape[1] * r2o[0]) / OW),
-                      min(1, (r2o[2] + roads.shape[0] * r2o[0]) / OH)]
+        # warp roads to the full overview frame; coverage alpha marks where the
+        # roads image actually lands (works with rotation, unlike a bbox rect)
+        Mr = (SF2 * np.asarray(r2o, float)).astype(np.float32)
+        roads_t = cv2.warpAffine(roads, Mr, (T2W, T2H), flags=cv2.INTER_CUBIC, borderValue=(255, 255, 255))
+        cover = cv2.warpAffine(np.full(roads.shape[:2], 255, np.uint8), Mr, (T2W, T2H),
+                               flags=cv2.INTER_NEAREST, borderValue=0)
+        rgba = cv2.cvtColor(roads_t, cv2.COLOR_BGR2BGRA)
+        rgba[..., 3] = cover
+        cv2.imencode(".png", rgba)[1].tofile(os.path.join(outdir, "texture_roads.png"))
+        has_roads = True
 
     th, tw = topo.shape[:2]
     GW, GH = 262, 196
@@ -495,10 +514,10 @@ def compose(outdir, overview, mosaic, to_ov, topo, t2o, roads, r2o, cmask,
     hg = cv2.remap(dem.astype(np.float32), mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     json.dump(dict(gw=GW, gh=GH, z=[round(float(v), 1) for v in hg.ravel()]),
               open(os.path.join(outdir, "heights.json"), "w"))
-    json.dump(dict(rects=bld), open(os.path.join(outdir, "buildings.json"), "w"))
+    json.dump(dict(polys=bld), open(os.path.join(outdir, "buildings.json"), "w"))
     json.dump(dict(items=vegj), open(os.path.join(outdir, "vegetation.json"), "w"))
     json.dump(dict(ow=OW, oh=OH, m_per_px=m_per_ovpx, world_w=OW * m_per_ovpx,
-                   world_h=OH * m_per_ovpx, roads_rect=roads_rect, place=name,
+                   world_h=OH * m_per_ovpx, has_roads=has_roads, place=name,
                    zmin=float(hg.min()), zmax=float(hg.max())),
               open(os.path.join(outdir, "meta.json"), "w", encoding="utf-8"), ensure_ascii=False)
     print("  wrote", outdir)
@@ -581,10 +600,18 @@ def main():
     bld, veg, shadow, ddir, run = extract_buildings(mosaic, px_m, to_ov)
     vegj = extract_vegetation(mosaic, veg, run, ddir, px_m, to_ov)
 
+    # roads layer transform (studio overlay affine, or legacy scale/translate)
+    r2o = None
+    if roads is not None:
+        if cfg.get("roads_affine") and len(cfg["roads_affine"]) == 6:
+            r2o = np.array(cfg["roads_affine"], float).reshape(2, 3)
+        elif cfg.get("roads_transform"):
+            r2o = _sim_affine(*cfg["roads_transform"])
+
     print("[6/6] compose")
     outdir = os.path.join(args.out, args.site)
     compose(outdir, overview, mosaic, to_ov, inpaint_blue(topo), t2o, roads,
-            cfg.get("roads_transform"), cmask, dem, km_px, bld, vegj, args.name)
+            r2o, cmask, dem, km_px, bld, vegj, args.name)
 
     sites_p = os.path.join(args.out, "sites.json")
     sites = json.load(open(sites_p, encoding="utf-8")) if os.path.exists(sites_p) else []

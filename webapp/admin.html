@@ -97,29 +97,36 @@
 </div>
 
 <div class="card" id="cardPairs" style="display:none">
-  <h2><span class="step-num">4</span>יישור המפה על גבי התצלום</h2>
+  <h2><span class="step-num">4</span>יישור השכבות על גבי התצלום</h2>
   <div class="hint" style="margin-bottom:10px">
-    המפה הטופוגרפית מונחת <b>על</b> התצלום. גררי אותה כדי להזיז, גלגלת העכבר להגדלה/הקטנה,
-    והמחוונים לסיבוב ולשקיפות — עד שהכבישים והמבנים חופפים לתצלום. הדיוק כאן קובע את איכות הדגם.
+    כל שכבה (מפה טופוגרפית, כבישים) מונחת <b>על</b> התצלום. בוחרים שכבה פעילה, גוררים אותה,
+    גלגלת להגדלה/הקטנה, ומחוונים לסיבוב ולשקיפות — עד שהתוואי חופף לתצלום.
+    <br><b>נעיצה:</b> מיישרים נקודה בולטת (צומת), לוחצים 📌 ולוחצים עליה — מעכשיו הסיבוב וההגדלה מסתובבים <b>סביב</b> הנקודה הנעוצה.
+  </div>
+  <div class="rowflex" style="margin-bottom:8px">
+    <label style="font-size:12px; color:#cfe0f3">שכבה פעילה
+      <select id="alLayer" style="width:150px; display:inline-block"></select></label>
+    <label style="font-size:12px; color:#cfe0f3"><input type="checkbox" id="alVis" checked style="vertical-align:middle"> מוצגת</label>
+    <label style="font-size:12px; color:#cfe0f3">שקיפות
+      <input id="alOpacity" type="range" min="0" max="1" step="0.02" value="0.55" style="width:110px; vertical-align:middle"></label>
+    <button id="alTop" class="sec" style="padding:5px 12px">הבא לחזית</button>
   </div>
   <div class="rowflex" style="margin-bottom:10px">
-    <label style="font-size:12px; color:#cfe0f3">שקיפות מפה
-      <input id="alOpacity" type="range" min="0" max="1" step="0.02" value="0.55" style="width:120px; vertical-align:middle"></label>
     <label style="font-size:12px; color:#cfe0f3">סיבוב
-      <input id="alRot" type="range" min="-180" max="180" step="0.2" value="0" style="width:150px; vertical-align:middle"></label>
+      <input id="alRot" type="range" min="-180" max="180" step="0.2" value="0" style="width:140px; vertical-align:middle"></label>
     <span id="alRotV" class="hint" style="width:38px">0°</span>
     <button id="alRot90ccw" class="sec" style="padding:5px 10px" title="סיבוב 90° נגד כיוון השעון">↺ 90°</button>
     <button id="alRot90cw" class="sec" style="padding:5px 10px" title="סיבוב 90° עם כיוון השעון">↻ 90°</button>
     <button id="alZoomIn" class="sec" style="padding:5px 12px">＋</button>
     <button id="alZoomOut" class="sec" style="padding:5px 12px">－</button>
-    <button id="alReset" class="sec" style="padding:5px 12px">איפוס</button>
-    <button id="alSwap" class="sec" style="padding:5px 12px">החלף שכבה עליונה</button>
+    <button id="alPin" class="sec" style="padding:5px 12px">📌 נעיצה</button>
+    <button id="alReset" class="sec" style="padding:5px 12px">איפוס שכבה</button>
   </div>
   <div id="alignBox" style="position:relative; width:100%; overflow:hidden; border-radius:10px; background:#0a0f14; cursor:grab; touch-action:none">
-    <img id="alOv" style="position:absolute; top:0; left:0; width:100%; user-select:none; pointer-events:none">
-    <img id="alTopo" style="position:absolute; top:0; left:0; transform-origin:0 0; user-select:none; pointer-events:none">
+    <img id="alBase" style="position:absolute; top:0; left:0; width:100%; user-select:none; pointer-events:none">
+    <div id="alPinMark" style="position:absolute; width:18px; height:18px; margin:-9px 0 0 -9px; border:2px solid #ff3b3b; border-radius:50%; box-shadow:0 0 0 2px #fff; display:none; pointer-events:none; z-index:99"></div>
   </div>
-  <div class="hint" style="margin-top:6px">טיפ: התחילי בהתאמת נקודה בולטת (צומת ראשי), ואז סובבי והתאימי סקאלה סביבה.</div>
+  <div class="hint" id="alHint" style="margin-top:6px">טיפ: יישרי נקודה בולטת, נעצי אותה, ואז סובבי והגדילי סביבה.</div>
 </div>
 
 <div class="card" id="cardBuild" style="display:none">
@@ -137,8 +144,11 @@
 const $ = id => document.getElementById(id);
 let SITE = '', FILES = [], ROLES = {}, ANCHORS = [];
 let natTopo = [1, 1], natOv = [1, 1];
-// overlay alignment transform (topo element pixels -> display px): translate T, scale K, rotate θ
-const AL = { Tx: 0, Ty: 0, K: 1, rot: 0, opacity: 0.55, topoOnTop: true };
+// multi-layer alignment: each map layer has its own transform onto the base aerial
+let LAYERS = [];        // {id,label,file,nat:[w,h],tf:{Tx,Ty,K,rot,op,vis},pin:null|[lx,ly],el}
+let baseNat = [1, 1];
+let ACT = 0;            // active layer index
+let pinArm = false;     // waiting for a click to place the pin
 
 $('createBtn').onclick = () => {
   const id = $('siteId').value.trim();
@@ -223,22 +233,13 @@ function afterRoles(){
 }
 
 $('toStep3').onclick = () => {
-  const topo = roleFile('topo'), ov = overviewFile();
+  const topo = roleFile('topo'), ov = overviewFile(), roads = roleFile('roads');
   if (!topo || !ov) { alert('צריך מפה טופוגרפית ותצלום אוויר'); return; }
   $('cardAnchors').style.display = $('cardPairs').style.display = $('cardBuild').style.display = '';
   const ai = $('anchorImg');
   ai.src = `/input/${SITE}/${encodeURIComponent(topo)}`;
   ai.onload = () => { natTopo = [ai.naturalWidth, ai.naturalHeight]; };
-  // overlay layers
-  const alOv = $('alOv'), alTopo = $('alTopo');
-  alOv.src = `/input/${SITE}/${encodeURIComponent(ov)}`;
-  alTopo.src = `/input/${SITE}/${encodeURIComponent(topo)}`;
-  alOv.onload = () => {
-    natOv = [alOv.naturalWidth, alOv.naturalHeight];
-    sizeAlignBox();
-    initAlign();
-  };
-  alTopo.onload = () => { natTopo = [alTopo.naturalWidth, alTopo.naturalHeight]; initAlign(); };
+  setupLayers(ov, topo, roads);
   $('cardAnchors').scrollIntoView({ behavior: 'smooth' });
 };
 
@@ -279,97 +280,154 @@ function renderAnchors(){
   $('anchorCount').textContent = ANCHORS.length;
 }
 
-// ---- overlay alignment ----
-const alignBox = $('alignBox'), alTopo = $('alTopo'), alOv = $('alOv');
+// ---- multi-layer overlay alignment ----
+const alignBox = $('alignBox'), alBase = $('alBase');
+function dispScale(){ return alignBox.clientWidth / baseNat[0]; }  // base native -> display px
 function sizeAlignBox(){
-  // fit within card width and a comfortable max height, keeping ov aspect ratio
   const cardW = alignBox.parentElement.clientWidth - 4;
   const maxH = Math.min(600, innerHeight * 0.7);
-  let w = Math.min(cardW, maxH * natOv[0] / natOv[1]);
+  const w = Math.min(cardW, maxH * baseNat[0] / baseNat[1]);
   alignBox.style.width = w + 'px';
-  alignBox.style.height = (w * natOv[1] / natOv[0]) + 'px';
+  alignBox.style.height = (w * baseNat[1] / baseNat[0]) + 'px';
   alignBox.style.margin = '0 auto';
+  layoutLayers();
 }
-function dispScaleOv(){ return alignBox.clientWidth / natOv[0]; }  // ov native -> display px
-let alignInited = false;
-function initAlign(){
-  if (alignInited || natOv[0] < 2 || natTopo[0] < 2) return;
-  if (!alOv.complete || !alTopo.complete) return;
-  alignInited = true;
-  // start: topo fit to box width, centered vertically, semi-transparent
-  AL.K = alignBox.clientWidth / natTopo[0];
-  AL.Tx = 0;
-  AL.Ty = (alignBox.clientHeight - natTopo[1] * AL.K) / 2;
-  AL.rot = 0;
-  applyAlign();
+function setupLayers(ovFile, topoFile, roadsFile){
+  // remove old layer imgs
+  LAYERS.forEach(l => l.el && l.el.remove());
+  LAYERS = []; ACT = 0; pinArm = false;
+  alBase.src = `/input/${SITE}/${encodeURIComponent(ovFile)}`;
+  alBase.onload = () => { baseNat = [alBase.naturalWidth, alBase.naturalHeight]; sizeAlignBox(); };
+  const defs = [{ id: 'topo', label: 'מפה טופוגרפית', file: topoFile }];
+  if (roadsFile) defs.push({ id: 'roads', label: 'מפת כבישים', file: roadsFile });
+  const sel = $('alLayer'); sel.innerHTML = '';
+  defs.forEach((d, i) => {
+    const el = document.createElement('img');
+    el.style.cssText = 'position:absolute;top:0;left:0;transform-origin:0 0;user-select:none;pointer-events:none';
+    el.src = `/input/${SITE}/${encodeURIComponent(d.file)}`;
+    const layer = { ...d, nat: [1, 1], tf: { Tx: 0, Ty: 0, K: 1, rot: 0, op: 0.55, vis: true }, pin: null, el, ready: false };
+    el.onload = () => { layer.nat = [el.naturalWidth, el.naturalHeight]; layer.ready = true; initLayer(layer); };
+    alignBox.appendChild(el);
+    LAYERS.push(layer);
+    const o = document.createElement('option'); o.value = i; o.textContent = d.label; sel.appendChild(o);
+  });
+  sel.value = 0; ACT = 0;
+  sel.onchange = () => { ACT = +sel.value; syncControls(); };
 }
-function applyAlign(){
-  alTopo.style.transform = `translate(${AL.Tx}px, ${AL.Ty}px) scale(${AL.K}) rotate(${AL.rot}deg)`;
-  alTopo.style.opacity = AL.opacity;
-  alTopo.style.zIndex = AL.topoOnTop ? 2 : 0;
-  alOv.style.zIndex = AL.topoOnTop ? 1 : 2;
-  alOv.style.opacity = AL.topoOnTop ? 1 : AL.opacity;
-  alTopo.style.opacity = AL.topoOnTop ? AL.opacity : 1;
-  $('alRotV').textContent = AL.rot.toFixed(1) + '°';
+function initLayer(l){
+  if (baseNat[0] < 2) { alBase.onload && alBase.onload(); }
+  // start: fit to box width, centered, semi-transparent
+  l.tf.K = alignBox.clientWidth / l.nat[0];
+  l.tf.Tx = 0;
+  l.tf.Ty = (alignBox.clientHeight - l.nat[1] * l.tf.K) / 2;
+  l.tf.rot = 0; l.pin = null;
+  applyLayer(l); syncControls();
 }
-// build topo-native -> overview-native 2x3 affine [a,b,c,d,e,f]
-function topoAffine(){
-  const ds = dispScaleOv();
-  const s = AL.K / ds;
-  const th = AL.rot * Math.PI / 180;
+function applyLayer(l){
+  const t = l.tf;
+  l.el.style.transform = `translate(${t.Tx}px,${t.Ty}px) scale(${t.K}) rotate(${t.rot}deg)`;
+  l.el.style.opacity = t.op;
+  l.el.style.display = t.vis ? '' : 'none';
+}
+function layoutLayers(){ LAYERS.forEach((l, i) => { l.el.style.zIndex = i + 1; if (l.ready) applyLayer(l); }); }
+function act(){ return LAYERS[ACT]; }
+function syncControls(){
+  const l = act(); if (!l) return;
+  $('alOpacity').value = l.tf.op;
+  $('alVis').checked = l.tf.vis;
+  $('alRot').value = l.tf.rot;
+  $('alRotV').textContent = l.tf.rot.toFixed(1) + '°';
+  updatePinMark();
+}
+// layer-native -> base-native 2x3 affine [a,b,c,d,e,f]
+function layerAffine(l){
+  const ds = dispScale();
+  const s = l.tf.K / ds, th = l.tf.rot * Math.PI / 180;
   const cos = Math.cos(th), sin = Math.sin(th);
-  return [ s * cos, -s * sin, AL.Tx / ds,
-           s * sin,  s * cos, AL.Ty / ds ];
+  return [s * cos, -s * sin, l.tf.Tx / ds, s * sin, s * cos, l.tf.Ty / ds];
 }
-// drag to pan
+// screen (box) position of a layer-native point
+function screenOf(l, lx, ly){
+  const th = l.tf.rot * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);
+  return [l.tf.Tx + l.tf.K * (lx * cos - ly * sin),
+          l.tf.Ty + l.tf.K * (lx * sin + ly * cos)];
+}
+function updatePinMark(){
+  const l = act(); const m = $('alPinMark');
+  if (l && l.pin){ const [sx, sy] = screenOf(l, l.pin[0], l.pin[1]); m.style.left = sx + 'px'; m.style.top = sy + 'px'; m.style.display = ''; }
+  else m.style.display = 'none';
+}
+// pivot for rotate/scale = pinned point (if set) else layer centre
+function pivotScreen(l){
+  if (l.pin) return screenOf(l, l.pin[0], l.pin[1]);
+  return screenOf(l, l.nat[0] / 2, l.nat[1] / 2);
+}
+function rotateTo(newRot){
+  const l = act(); const [sx, sy] = pivotScreen(l);
+  const pv = l.pin || [l.nat[0] / 2, l.nat[1] / 2];
+  l.tf.rot = newRot;
+  const th = newRot * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);
+  l.tf.Tx = sx - l.tf.K * (pv[0] * cos - pv[1] * sin);
+  l.tf.Ty = sy - l.tf.K * (pv[0] * sin + pv[1] * cos);
+  $('alRot').value = newRot; $('alRotV').textContent = newRot.toFixed(1) + '°';
+  applyLayer(l); updatePinMark();
+}
+function zoomBy(f){
+  const l = act(); const [sx, sy] = pivotScreen(l);
+  l.tf.Tx = sx - f * (sx - l.tf.Tx); l.tf.Ty = sy - f * (sy - l.tf.Ty);
+  l.tf.K *= f; applyLayer(l); updatePinMark();
+}
+function wrapDeg(d){ return ((d + 180) % 360 + 360) % 360 - 180; }
+$('alLayer'); // dropdown handler set in setupLayers
+$('alOpacity').oninput = e => { act().tf.op = +e.target.value; applyLayer(act()); };
+$('alVis').onchange = e => { act().tf.vis = e.target.checked; applyLayer(act()); };
+$('alRot').oninput = e => rotateTo(+e.target.value);
+$('alRot90ccw').onclick = () => rotateTo(wrapDeg(act().tf.rot - 90));
+$('alRot90cw').onclick = () => rotateTo(wrapDeg(act().tf.rot + 90));
+$('alZoomIn').onclick = () => zoomBy(1.12);
+$('alZoomOut').onclick = () => zoomBy(1 / 1.12);
+$('alReset').onclick = () => initLayer(act());
+$('alTop').onclick = () => {
+  // move active layer's img to the front (highest z among layers)
+  const l = act(); const maxZ = LAYERS.length + 1; l.el.style.zIndex = maxZ;
+};
+$('alPin').onclick = () => {
+  pinArm = true;
+  $('alHint').innerHTML = '👉 לחצי על הנקודה הבולטת בשכבה הפעילה כדי לנעוץ אותה.';
+  alignBox.style.cursor = 'crosshair';
+};
+// interactions on the box act on the ACTIVE layer
 let dragging = false, lastX = 0, lastY = 0;
 alignBox.addEventListener('pointerdown', e => {
+  const r = alignBox.getBoundingClientRect();
+  const bx = e.clientX - r.left, by = e.clientY - r.top;
+  if (pinArm){
+    // convert click (box px) to active layer-native coords -> store pin
+    const l = act(); const th = l.tf.rot * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);
+    const dx = (bx - l.tf.Tx) / l.tf.K, dy = (by - l.tf.Ty) / l.tf.K;
+    l.pin = [dx * cos + dy * sin, -dx * sin + dy * cos];   // inverse rotation
+    pinArm = false; alignBox.style.cursor = 'grab';
+    $('alHint').innerHTML = '📌 נעוץ. עכשיו הסיבוב וההגדלה יסתובבו סביב הנקודה. גרירה מזיזה את הכל.';
+    updatePinMark(); return;
+  }
   dragging = true; lastX = e.clientX; lastY = e.clientY;
   alignBox.style.cursor = 'grabbing'; alignBox.setPointerCapture(e.pointerId);
 });
 alignBox.addEventListener('pointermove', e => {
   if (!dragging) return;
-  AL.Tx += e.clientX - lastX; AL.Ty += e.clientY - lastY;
-  lastX = e.clientX; lastY = e.clientY; applyAlign();
+  const l = act(); l.tf.Tx += e.clientX - lastX; l.tf.Ty += e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY; applyLayer(l); updatePinMark();
 });
-alignBox.addEventListener('pointerup', e => { dragging = false; alignBox.style.cursor = 'grab'; });
-// wheel to zoom around cursor
+alignBox.addEventListener('pointerup', () => { dragging = false; alignBox.style.cursor = 'grab'; });
 alignBox.addEventListener('wheel', e => {
   e.preventDefault();
   const r = alignBox.getBoundingClientRect();
   const cx = e.clientX - r.left, cy = e.clientY - r.top;
-  const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
-  // keep the point under the cursor fixed: T' = C - factor*(C - T)
-  AL.Tx = cx - factor * (cx - AL.Tx);
-  AL.Ty = cy - factor * (cy - AL.Ty);
-  AL.K *= factor; applyAlign();
+  const f = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+  const l = act();
+  l.tf.Tx = cx - f * (cx - l.tf.Tx); l.tf.Ty = cy - f * (cy - l.tf.Ty);
+  l.tf.K *= f; applyLayer(l); updatePinMark();
 }, { passive: false });
-$('alOpacity').oninput = e => { AL.opacity = +e.target.value; applyAlign(); };
-// rotate while keeping the topo image's own center fixed on screen (so the
-// slider/quick-rotate buttons spin the map in place instead of flinging it away)
-function rotateTo(newRot){
-  const cx = natTopo[0] / 2, cy = natTopo[1] / 2;
-  const oldRad = AL.rot * Math.PI / 180, newRad = newRot * Math.PI / 180;
-  const dispX = AL.Tx + AL.K * (cx * Math.cos(oldRad) - cy * Math.sin(oldRad));
-  const dispY = AL.Ty + AL.K * (cx * Math.sin(oldRad) + cy * Math.cos(oldRad));
-  AL.Tx = dispX - AL.K * (cx * Math.cos(newRad) - cy * Math.sin(newRad));
-  AL.Ty = dispY - AL.K * (cx * Math.sin(newRad) + cy * Math.cos(newRad));
-  AL.rot = newRot;
-  $('alRot').value = newRot;
-  applyAlign();
-}
-$('alRot').oninput = e => rotateTo(+e.target.value);
-function wrapDeg(d){ return ((d + 180) % 360 + 360) % 360 - 180; }
-$('alRot90ccw').onclick = () => rotateTo(wrapDeg(AL.rot - 90));
-$('alRot90cw').onclick = () => rotateTo(wrapDeg(AL.rot + 90));
-function zoomCenter(f){
-  const cx = alignBox.clientWidth / 2, cy = alignBox.clientHeight / 2;
-  AL.Tx = cx - f * (cx - AL.Tx); AL.Ty = cy - f * (cy - AL.Ty); AL.K *= f; applyAlign();
-}
-$('alZoomIn').onclick = () => zoomCenter(1.12);
-$('alZoomOut').onclick = () => zoomCenter(1 / 1.12);
-$('alReset').onclick = () => { AL.rot = 0; $('alRot').value = 0; alignInited = false; initAlign(); };
-$('alSwap').onclick = () => { AL.topoOnTop = !AL.topoOnTop; applyAlign(); };
 
 // ---- build & publish ----
 async function pollLog(onDone){
@@ -392,7 +450,11 @@ $('buildBtn').onclick = async () => {
     aerials: FILES.filter(f => (ROLES[f] || 'aerial') === 'aerial' || ROLES[f] === 'overview'),
     anchors: ANCHORS.map(a => [Math.round(a[0] * natTopo[0]), Math.round(a[1] * natTopo[1]), a[2]]),
   };
-  if (alignInited) config.topo_affine = topoAffine();   // manual overlay alignment
+  // manual overlay alignment per layer
+  const topoLayer = LAYERS.find(l => l.id === 'topo' && l.ready);
+  const roadsLayer = LAYERS.find(l => l.id === 'roads' && l.ready);
+  if (topoLayer) config.topo_affine = layerAffine(topoLayer);
+  if (roadsLayer) config.roads_affine = layerAffine(roadsLayer);
   $('buildBtn').disabled = true;
   await fetch('/build', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ site: SITE, name: $('siteName').value.trim(), config }) });
